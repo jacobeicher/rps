@@ -132,7 +132,7 @@ def update_board(board, combat_mode = "random"):
             for cell in range(board.get_size()[1]):
                 board.update_cell(row, cell)
                 
-                board.update_neighbors(row, cell, board_reference)
+
     elif combat_mode == "random":
         board_reference = board.get_copy()
         cell_list = [board_reference.board[row][col] for row in range(board_reference.height) for col in range(board_reference.width)]
