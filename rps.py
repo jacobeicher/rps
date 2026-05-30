@@ -27,23 +27,32 @@ def get_row_padding(board, row_number):
     return ' ' * row_padding
 
 def display_board(board):
-    # headerLine = f" {get_row_padding(board, 0)}|"
-    # for header in range(len(board)):
-    #     headerLine += f" {header} |"
-    # # print(headerLine)
-    # print('-'*len(headerLine))
-
+    first_row = True
     for row in range(len(board)):
-       
-        # line = f"{row}{get_row_padding(board, row)}|"
         line = '|'
         for cell in range(len(board[row])):
-            adaptive_padding = math.floor(cell/10)
             cell_value = board[row][cell]
             active_color = colorMap[cell_value]
             line += f" {active_color}{cell_value} {colors['ENDC']}|"
+        if first_row:
+            lineLength = len(board) * 4
+            print(len(board))
+            print('-'*lineLength)
+            first_row = False
+
         print(line)
-        print('-'*len(headerLine))
+        print('-'*lineLength)
+
+
+
+def display_board_compact(board):
+    for row in range(len(board)):
+        line = ''
+        for cell in range(len(board[row])):
+            cell_value = board[row][cell]
+            active_color = colorMap[cell_value]
+            line += f"{active_color}{cell_value}{colors['ENDC']}"
+        print(line)
 def setup(board_size = 10):
     board =  [ ['0']*board_size for _ in range(board_size) ]
 
@@ -54,7 +63,7 @@ def setup(board_size = 10):
         for cell in range(len(board[row])):
             board[row][cell] = map[random.choice([0,1,2,3])]
 
-    display_board(board)
+    display_board_compact(board)
     return board
 
 
