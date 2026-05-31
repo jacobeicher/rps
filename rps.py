@@ -52,7 +52,6 @@ class Cell:
         return Cell.colors.get(self.value, '#FFFFFF')
     
     def fight(self, other):
-
         if other.get_value() in self.rules[self.get_value()]['beats']:
             return 1
         elif other.get_value() in self.rules[self.get_value()]['beatenBy']:
@@ -127,24 +126,35 @@ class Board:
         if random.random() < self.mutation_rate:
             # Mutate to a random value
             self.set(row, cell, random.choice(self.types))
-            return
+  
         
         # Normal update logic
         cell_neighbors = reference.get_neighbors(row, cell)
         losses = 0
         friends = 0
-        type = ''
+        losing_types = []  # Track all types that beat this cell
 
         for neighbor in cell_neighbors:
             result = self.get(row, cell).fight(neighbor)
             if  result < 0:
                 losses += 1
-                type = neighbor.get_value()
+                losing_types.append(neighbor.get_value())
             elif result == 0:
                 friends += 1
-        
-        if losses > 0 and losses * 2 > friends:
-            self.set(row, cell, type)
+
+        # Blank cells are not protected by neighbors
+        if self.get(row, cell).get_value() == '0':
+            # Blank cells convert if they have any losing neighbors
+            if losses > 0:
+                # Choose the most common losing type
+                type = max(set(losing_types), key=losing_types.count)
+                self.set(row, cell, type)
+        else:
+            # Non-blank cells can be protected by neighbors
+            if (losses > 0 and losses * 2 > friends):
+                # Choose the most common losing type
+                type = max(set(losing_types), key=losing_types.count)
+                self.set(row, cell, type)
 
 
     def get_stats(self):
@@ -224,7 +234,7 @@ class Board:
 class RPSGui:
     def __init__(self, root, board_height=100, board_width=228, cell_size=5):
         self.root = root
-        self.root.title("Rock Paper Scissors Simulation")
+        self.root.title("RPS Simulation")
         
         self.cell_size = cell_size
         self.board = Board(height=board_height, width=board_width)
