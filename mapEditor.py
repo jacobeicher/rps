@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import json
-
+import os
 
 class MapEditor:
     def __init__(self, root, board_height=100, board_width=200, cell_size=5):
@@ -263,7 +263,8 @@ class MapEditor:
         filename = filedialog.asksaveasfilename(
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            title="Save Map"
+            title="Save Map",
+            initialdir=os.getcwd() + "/maps"
         )
         
         if filename:
@@ -285,7 +286,8 @@ class MapEditor:
         """Load a map from a JSON file"""
         filename = filedialog.askopenfilename(
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            title="Load Map"
+            title="Load Map",
+            initialdir=os.getcwd() + "/maps"
         )
         
         if filename:

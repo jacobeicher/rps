@@ -1,9 +1,8 @@
-import math
 import random
-import time
 import tkinter as tk
 from tkinter import ttk
 import json
+import os
 
 class Cell:
     rules = {
@@ -299,7 +298,8 @@ class RPSGui:
         
         filename = filedialog.askopenfilename(
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            title="Load Map"
+            title="Load Map",
+            initialdir=os.getcwd() + "/maps"
         )
         
         if filename:
