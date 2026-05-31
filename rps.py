@@ -1,161 +1,457 @@
 import math
 import random
 import time
-
+import tkinter as tk
+from tkinter import ttk
+import json
 
 class Cell:
-    colors = {
-    'HEADER': '\033[95m',
-    'OKBLUE': '\033[94m',
-    'OKCYAN': '\033[96m',
-    'OKGREEN': '\033[92m',
-    'WARNING': '\033[93m',
-    'FAIL': '\033[91m',
-    'ENDC': '\033[0m',
-    'BOLD': '\033[1m',
-    'UNDERLINE': '\033[4m'
+    rules = {
+            'r': {'beats': ['s','l'], 'beatenBy': ['p','o']},
+            'p': {'beats': ['r','o'], 'beatenBy': ['l','s']},
+            's': {'beats': ['l','p'], 'beatenBy': ['o','r']},
+            'l': {'beats': ['o','p'], 'beatenBy': ['s','r']},
+            'o': {'beats': ['r','s'], 'beatenBy': ['l','p']},
+            '0': {'beats': [], 'beatenBy': ['r','p','s','l','o']},
+        }
+    colors =  {
+        'r': '#FFD700',  # Gold
+        'p': '#32CD32',  # Lime Green
+        's': '#4169E1',  # Royal Blue
+        'l': '#FF1493',  # Deep Pink
+        'o': '#00CED1',  # Dark Turquoise
+        '0': '#FFFFFF'   # White
     }
-
-    colorMap = {
-        'r': colors["OKBLUE"],
-        'p': colors["OKGREEN"],
-        's': colors["WARNING"],
-        '0': ''
-    }
+    # colors = {
+    #     'r': '#FF4500',  # Red-Orange (OrangeRed)
+    #     'p': '#1E90FF',  # Green (Lime)
+    #     's': '#00FF00',  # Blue (DodgerBlue)
+    #     '0': '#FFFFFF'   # White
+    # }
+    
     def __init__(self, x, y, value):
         self.value = value
         self.x = x
-        self.y =  y
+        self.y = y
         self.locked = False
 
     def lock(self):
         self.locked = True
+    
     def set_value(self, value):
         if self.locked:
             return
         self.value = value
+    
     def get_value(self):
         return self.value
+    
     def get_xy(self):
-        return (self.x, self.y) 
+        return (self.x, self.y)
+    
     def get_color(self):
-        return self.colorMap.get(self.value, '')
+        return Cell.colors.get(self.value, '#FFFFFF')
+    
     def fight(self, other):
-        if self.get_value() == other.get_value():
-            return 0
-        elif self.get_value() == 'r' and other.get_value() == 'p':
-            return -1
-        elif self.get_value() == 'r' and other.get_value() =='s':
+
+        if other.get_value() in self.rules[self.get_value()]['beats']:
             return 1
-        elif self.get_value() == 'p' and other.get_value() == 'r':
-            return 1
-        elif self.get_value() == 'p' and other.get_value() =='s':
+        elif other.get_value() in self.rules[self.get_value()]['beatenBy']:
             return -1
-        elif self.get_value() =='s' and other.get_value() == 'r':
-            return -1
-        elif self.get_value() =='s' and other.get_value() == 'p':
-            return 1
         else:
             return 0
 
+
 class Board:
-    def __init__(self, height=53, width=133, combat_mode = "fixed", include_blanks = False, initial_value = None):
+    def __init__(self, height=53, width=133, combat_mode="fixed", include_blanks=False, canvas_loopback=False, mutation_rate=0.0, initial_value=None):
         self.height = height
         self.width = width
         self.combat_mode = combat_mode
         self.include_blanks = include_blanks
+        self.canvas_loopback = canvas_loopback
+        self.mutation_rate = mutation_rate
         self.board = [[Cell(h, w, '0') for w in range(width)] for h in range(height)]
+        self.last_stats = {'r': 0, 'p': 0, 's': 0, '0': 0} 
+        self.types = ['r', 'p','s','l','o']
         self.populate_board(initial_value)
+
+        if include_blanks:
+            self.types.append('0')
+    
     def populate_board(self, initial_value):
         if initial_value is not None:
-            self.board = initial_value
+            for row in range(self.height):
+                for cell in range(self.width):
+                    self.board[row][cell].set_value(initial_value[row][cell])
             return
         
-        map = ['r','p','s','s']
-        choices = [0,1,2,3] if self.include_blanks else [0,1,2]
+        choices = range(len(self.types))
         for row in range(self.height):
             for cell in range(self.width):
-                self.board[row][cell].set_value(map[random.choice(choices)])
+                self.board[row][cell].set_value(self.types[random.choice(choices)])
     
     def get_size(self):
         return (self.height, self.width)
 
     def get(self, row, col):
-        if not (0 <= row < self.height and 0 <= col < self.width):
+        if self.canvas_loopback:
+            # Wrap around using modulo
+            row = row % self.height
+            col = col % self.width
+            return self.board[row][col]
+        else:
+            # Return blank cell if out of bounds
+            if not (0 <= row < self.height and 0 <= col < self.width):
                 return Cell(row, col, '0')
-        return self.board[row][col]
+            return self.board[row][col]
 
     def set(self, row, col, val):
         self.board[row][col].set_value(val)
 
-    def update_neighbors(self, row, col, reference):
-        for dr in range(-1, 2):
-            for dc in range(-1, 2):
-                if dr == 0 and dc == 0:
-                    continue
-                neighbor_row, neighbor_col = row + dr, col + dc
-                # Check bounds
-                if 0 <= neighbor_row < self.height and 0 <= neighbor_col < self.width:
-                    if (self.get(row, col).fight(reference.get(neighbor_row, neighbor_col))) > 0:
-                        self.set(neighbor_row, neighbor_col, self.get(row, col).get_value())  # Add .get_value()
-
     def get_neighbors(self, row, col):
         return [self.get(row + dr, col + dc) for dr in range(-1, 2) for dc in range(-1, 2) if not (dr == 0 and dc == 0)]
+    
     def get_copy(self):
-        return Board(self.height, self.width, self.combat_mode, self.include_blanks, self.board)
- 
-    def update_cell(self, row, cell):
-        cell_neighbors = self.get_neighbors(row, cell)
-        for neighbor in cell_neighbors:
-            if self.get(row, cell).fight(neighbor) < 0:
-                self.set(row, cell, neighbor.get_value())  # Add .get_value()
+        # Create a 2D list of values instead of Cell objects
+        board_values = [[self.board[row][col].get_value() for col in range(self.width)] for row in range(self.height)]
+        return Board(
+            height=self.height, 
+            width=self.width, 
+            combat_mode=self.combat_mode, 
+            include_blanks=self.include_blanks, 
+            canvas_loopback=self.canvas_loopback,
+            mutation_rate=self.mutation_rate,
+            initial_value=board_values
+        )
+    def update_cell(self, row, cell, reference ):
+        # Check for mutation first
+        if random.random() < self.mutation_rate:
+            # Mutate to a random value
+            self.set(row, cell, random.choice(self.types))
+            return
         
-def display_board(board):
-    for row in range(board.get_size()[0]):
-        line = ''
-        for cell in range(board.get_size()[1]):
-            cell_value = board.get(row, cell).get_value()
-            active_color = board.get(row, cell).get_color()
-            ENDC = '\033[0m'
-            line += f"{active_color}{cell_value}{ENDC}"
-        print(line)
+        # Normal update logic
+        cell_neighbors = reference.get_neighbors(row, cell)
+        losses = 0
+        friends = 0
+        type = ''
+
+        for neighbor in cell_neighbors:
+            result = self.get(row, cell).fight(neighbor)
+            if  result < 0:
+                losses += 1
+                type = neighbor.get_value()
+            elif result == 0:
+                friends += 1
+        
+        if losses > 0 and losses * 2 > friends:
+            self.set(row, cell, type)
 
 
+    def get_stats(self):
+        """Calculate current statistics for each cell type"""
+        stats = {'r': 0, 'p': 0, 's': 0, '0': 0}
+        total_cells = self.height * self.width
+        
+        for row in range(self.height):
+            for col in range(self.width):
+                cell_value = self.get(row, col).get_value()
+                stats[cell_value] += 1
+        
+        # Calculate percentages
+        percentages = {key: (count / total_cells) * 100 for key, count in stats.items()}
+        
+        # Calculate changes from last round
+        changes = {key: stats[key] - self.last_stats[key] for key in stats.keys()}
+        change_percentages = {key: (changes[key] / total_cells) * 100 for key in changes.keys()}
+        
+        return {
+            'counts': stats,
+            'percentages': percentages,
+            'changes': changes,
+            'change_percentages': change_percentages
+        }
+    
+    def print_stats(self):
+        """Print statistics about the current board state"""
+        stats = self.get_stats()
+        total_cells = self.height * self.width
+        
+        print("\n" + "="*60)
+        print("BOARD STATISTICS")
+        print("="*60)
+        print(f"Total Cells: {total_cells}")
+        print("-"*60)
+        
+        labels = {'r': 'Rock', 'p': 'Paper', 's': 'Scissors', '0': 'Blank'}
+        
+        for key in ['r', 'p', 's', '0']:
+            count = stats['counts'][key]
+            percentage = stats['percentages'][key]
+            change = stats['changes'][key]
+            change_pct = stats['change_percentages'][key]
+            
+            change_str = f"{change:+d}" if change != 0 else "0"
+            change_pct_str = f"({change_pct:+.2f}%)" if change != 0 else "(0.00%)"
+            
+            print(f"{labels[key]:10s}: {count:6d} ({percentage:6.2f}%) | Change: {change_str:6s} {change_pct_str}")
+        
+        print("="*60 + "\n")
+        
+        # Update last stats for next comparison
+        self.last_stats = stats['counts'].copy()
 
 
+class RPSGui:
+    def __init__(self, root, board_height=100, board_width=200, cell_size=5):
+        self.root = root
+        self.root.title("Rock Paper Scissors Simulation")
+        
+        self.cell_size = cell_size
+        self.board = Board(height=board_height, width=board_width)
+        
+        # Create canvas
+        canvas_width = board_width * cell_size
+        canvas_height = board_height * cell_size
+        self.canvas = tk.Canvas(root, width=canvas_width, height=canvas_height, bg='white')
+        self.canvas.pack(padx=10, pady=10)
+        
+        # Create control frame
+        control_frame = ttk.Frame(root)
+        control_frame.pack(pady=5)
+        
+        self.running = False
+        self.start_button = ttk.Button(control_frame, text="Start", command=self.toggle_simulation)
+        self.start_button.pack(side=tk.LEFT, padx=5)
+        
+        self.reset_button = ttk.Button(control_frame, text="Reset", command=self.reset_board)
+        self.reset_button.pack(side=tk.LEFT, padx=5)
+        
+        self.stats_button = ttk.Button(control_frame, text="Show Stats", command=self.show_stats)
+        self.stats_button.pack(side=tk.LEFT, padx=5)
 
+        self.load_button = ttk.Button(control_frame, text="Load Map", command=self.load_map)
+        self.load_button.pack(side=tk.LEFT, padx=5)
+        
+        # Speed control
+        ttk.Label(control_frame, text="Speed:").pack(side=tk.LEFT, padx=5)
+        self.speed_var = tk.IntVar(value=50)
+        self.speed_scale = ttk.Scale(control_frame, from_=1, to=100, variable=self.speed_var, orient=tk.HORIZONTAL, length=200)
+        self.speed_scale.pack(side=tk.LEFT, padx=5)
+        
+        # Combat mode selection
+        ttk.Label(control_frame, text="Mode:").pack(side=tk.LEFT, padx=5)
+        self.mode_var = tk.StringVar(value="random")
+        mode_combo = ttk.Combobox(control_frame, textvariable=self.mode_var, values=["fixed", "random"], state="readonly", width=10)
+        mode_combo.pack(side=tk.LEFT, padx=5)
 
-def update_board(board, combat_mode = "random"):
-    if combat_mode == "fixed":
-        board_reference = board.get_copy()
-        for row in range(board.get_size()[0]):
-            for cell in range(board.get_size()[1]):
-                board.update_cell(row, cell)
+         # Mutation rate control
+        ttk.Label(control_frame, text="Mutation %:").pack(side=tk.LEFT, padx=5)
+        self.mutation_var = tk.StringVar(value="0.0")
+        self.mutation_entry = ttk.Entry(control_frame, textvariable=self.mutation_var, width=8)
+        self.mutation_entry.pack(side=tk.LEFT, padx=5)
+        self.mutation_entry.bind('<Return>', self.update_mutation_rate)
+        self.mutation_entry.bind('<FocusOut>', self.update_mutation_rate)
+        
+        # Canvas loopback toggle
+        self.loopback_var = tk.BooleanVar(value=True)
+        loopback_check = ttk.Checkbutton(control_frame, text="Wrap Edges", variable=self.loopback_var, command=self.toggle_loopback)
+        loopback_check.pack(side=tk.LEFT, padx=5)
+        
+        # Create rectangles for each cell
+        self.rectangles = []
+        for row in range(board_height):
+            row_rects = []
+            for col in range(board_width):
+                x1 = col * cell_size
+                y1 = row * cell_size
+                x2 = x1 + cell_size
+                y2 = y1 + cell_size
+                rect = self.canvas.create_rectangle(x1, y1, x2, y2, fill='white', outline='')
+                row_rects.append(rect)
+            self.rectangles.append(row_rects)
+        
+        self.draw_board()
+    
+    def load_map(self):
+        """Load a custom map from file"""
+        from tkinter import filedialog
+        
+        filename = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            title="Load Map"
+        )
+        
+        if filename:
+            try:
+                with open(filename, 'r') as f:
+                    map_data = json.load(f)
                 
-
-    elif combat_mode == "random":
-        board_reference = board.get_copy()
-        cell_list = [board_reference.board[row][col] for row in range(board_reference.height) for col in range(board_reference.width)]
-        for cell in random.choices(cell_list, k=len(cell_list)):
-                board.update_cell(cell.get_xy()[0], cell.get_xy()[1])
-
-              
-
-        display_board(board)
+                # Validate map data
+                if 'board' not in map_data or 'width' not in map_data or 'height' not in map_data:
+                    raise ValueError("Invalid map file format")
+                
+                # Stop simulation if running
+                self.running = False
+                self.start_button.config(text="Start")
+                
+                # Check if dimensions match
+                if map_data['width'] != self.board.width or map_data['height'] != self.board.height:
+                    from tkinter import messagebox
+                    if not messagebox.askyesno(
+                        "Dimension Mismatch",
+                        f"Map dimensions ({map_data['width']}x{map_data['height']}) "
+                        f"don't match current board ({self.board.width}x{self.board.height}). "
+                        f"Load anyway? (Board will be resized)"
+                    ):
+                        return
                     
-               
-       
+                    # Resize board
+                    self.board.height = map_data['height']
+                    self.board.width = map_data['width']
+                    self.recreate_canvas(map_data['height'], map_data['width'])
+                
+                # Load the board with preserved settings
+                loopback_state = self.board.canvas_loopback
+                mutation_rate = self.board.mutation_rate
+                
+                self.board = Board(
+                    height=map_data['height'],
+                    width=map_data['width'],
+                    include_blanks=True,
+                    canvas_loopback=loopback_state,
+                    mutation_rate=mutation_rate,
+                    initial_value=map_data['board']
+                )
+                
+                self.draw_board()
+                
+                from tkinter import messagebox
+                messagebox.showinfo("Success", f"Map loaded successfully!")
+                
+            except Exception as e:
+                from tkinter import messagebox
+                messagebox.showerror("Error", f"Failed to load map: {str(e)}")
+    
+    def recreate_canvas(self, new_height, new_width):
+        """Recreate canvas with new dimensions"""
+        # Destroy old canvas
+        self.canvas.destroy()
+        
+        # Create new canvas
+        canvas_width = new_width * self.cell_size
+        canvas_height = new_height * self.cell_size
+        self.canvas = tk.Canvas(self.root, width=canvas_width, height=canvas_height, bg='white')
+        
+        # Find the control frame and pack canvas before it
+        for widget in self.root.winfo_children():
+            if isinstance(widget, ttk.Frame):
+                self.canvas.pack(before=widget, padx=10, pady=10)
+                break
+        
+        # Create new rectangles
+        self.rectangles = []
+        for row in range(new_height):
+            row_rects = []
+            for col in range(new_width):
+                x1 = col * self.cell_size
+                y1 = row * self.cell_size
+                x2 = x1 + self.cell_size
+                y2 = y1 + self.cell_size
+                rect = self.canvas.create_rectangle(x1, y1, x2, y2, fill='white', outline='')
+                row_rects.append(rect)
+            self.rectangles.append(row_rects)
+    
+    def draw_board(self):
+        for row in range(self.board.get_size()[0]):
+            for col in range(self.board.get_size()[1]):
+                cell = self.board.get(row, col)
+                color = cell.get_color()
+                self.canvas.itemconfig(self.rectangles[row][col], fill=color)
+    def toggle_loopback(self):
+        """Toggle the canvas loopback setting"""
+        self.board.canvas_loopback = self.loopback_var.get()
+    
+    def update_mutation_rate(self, event=None):
+        """
+        Toggle the canvas loopback (edge wrapping) setting for the simulation board.
+        
+        This method updates the board's canvas_loopback attribute based on the current
+        state of the loopback checkbox variable. When loopback is enabled, cells at the
+        edges of the board will interact with cells on the opposite edge, creating a
+        toroidal topology. When disabled, edge cells treat out-of-bounds neighbors as
+        blank cells.
+        
+        Parameters
+        ----------
+        None
+        
+        Returns
+        -------
+        None
+        """
+        self.board.canvas_loopback = self.loopback_var.get()
+        """Update the mutation rate from the entry field"""
+        try:
+            rate = float(self.mutation_var.get())
+            # Clamp the value between 0 and 100
+            rate = max(0.0, min(100.0, rate))
+            self.mutation_var.set(f"{rate:.2f}")
+            self.board.mutation_rate = rate / 100.0  # Convert percentage to decimal
+        except ValueError:
+            # If invalid input, reset to current rate
+            self.mutation_var.set(f"{self.board.mutation_rate * 100:.2f}")
+
+    def show_stats(self):
+        """Display statistics in the console"""
+        self.board.print_stats()
+    
+    def update_board(self):
+        combat_mode = self.mode_var.get()
+        
+        if combat_mode == "fixed":
+            board_reference = self.board.get_copy()
+            for row in range(self.board.get_size()[0]):
+                for cell in range(self.board.get_size()[1]):
+                    self.board.update_cell(row, cell, board_reference)
+                   
+        elif combat_mode == "random":
+            board_reference = self.board.get_copy()
+            cell_list = [board_reference.board[row][col] for row in range(board_reference.height) for col in range(board_reference.width)]
+            for cell in random.choices(cell_list, k=len(cell_list)):
+                    self.board.update_cell(cell.get_xy()[0], cell.get_xy()[1], board_reference)
+    
+        self.draw_board()
+    
+    def toggle_simulation(self):
+        self.running = not self.running
+        if self.running:
+            self.start_button.config(text="Pause")
+            self.run_simulation()
+        else:
+            self.start_button.config(text="Start")
+    
+    def run_simulation(self):
+        if self.running:
+            self.update_board()
+            delay = int(1000 / self.speed_var.get())  # Convert speed to delay in ms
+            self.root.after(delay, self.run_simulation)
+    
+    def reset_board(self):
+        self.running = False
+        self.start_button.config(text="Start")
+        loopback_state = self.board.canvas_loopback
+        mutation_rate = self.board.mutation_rate
+        include_blanks = self.board.include_blanks
+        self.board = Board(height=self.board.height, width=self.board.width, include_blanks=include_blanks, canvas_loopback=loopback_state, mutation_rate=mutation_rate)
+        self.draw_board()
+
 
 def main():
-    game_board = Board(include_blanks=True )
-    display_board(game_board)
-    while True:
-        update_board(game_board)
-        time.sleep(.05)
-        
+    root = tk.Tk()
+    app = RPSGui(root, board_height=100, board_width=200, cell_size=5)
+    root.mainloop()
 
 
 if __name__ == "__main__":
-
     main()
-
