@@ -7,12 +7,12 @@ import json
 
 class Cell:
     rules = {
-            'r': {'beats': ['s','l'], 'beatenBy': ['p','o']},
-            'p': {'beats': ['r','o'], 'beatenBy': ['l','s']},
-            's': {'beats': ['l','p'], 'beatenBy': ['o','r']},
-            'l': {'beats': ['o','p'], 'beatenBy': ['s','r']},
-            'o': {'beats': ['r','s'], 'beatenBy': ['l','p']},
-            '0': {'beats': [], 'beatenBy': ['r','p','s','l','o']},
+            'r': {'beats': 'sl', 'beatenBy': 'po'},
+            'p': {'beats': 'ro', 'beatenBy': 'ls'},
+            's': {'beats': 'lp', 'beatenBy': 'or'},
+            'l': {'beats': 'op', 'beatenBy': 'sr'},
+            'o': {'beats': 'rs', 'beatenBy': 'lp'},
+            '0': {'beats': '', 'beatenBy': 'rpslo'},
         }
     colors =  {
         'r': '#FFD700',  # Gold
@@ -150,20 +150,31 @@ class Board:
 
     def get_stats(self):
         """Calculate current statistics for each cell type"""
-        stats = {'r': 0, 'p': 0, 's': 0, '0': 0}
+        # Initialize stats with all possible types
+        stats = {cell_type: 0 for cell_type in self.types}
+        if '0' not in stats:
+            stats['0'] = 0
+        
         total_cells = self.height * self.width
         
         for row in range(self.height):
             for col in range(self.width):
                 cell_value = self.get(row, col).get_value()
-                stats[cell_value] += 1
+                if cell_value in stats:
+                    stats[cell_value] += 1
+                else:
+                    stats[cell_value] = 1
         
         # Calculate percentages
         percentages = {key: (count / total_cells) * 100 for key, count in stats.items()}
         
         # Calculate changes from last round
-        changes = {key: stats[key] - self.last_stats[key] for key in stats.keys()}
-        change_percentages = {key: (changes[key] / total_cells) * 100 for key in changes.keys()}
+        changes = {}
+        change_percentages = {}
+        for key in stats.keys():
+            last_count = self.last_stats.get(key, 0)
+            changes[key] = stats[key] - last_count
+            change_percentages[key] = (changes[key] / total_cells) * 100
         
         return {
             'counts': stats,
@@ -183,9 +194,17 @@ class Board:
         print(f"Total Cells: {total_cells}")
         print("-"*60)
         
-        labels = {'r': 'Rock', 'p': 'Paper', 's': 'Scissors', '0': 'Blank'}
+        labels = {
+            'r': 'Rock',
+            'p': 'Paper',
+            's': 'Scissors',
+            'l': 'Lizard',
+            'o': 'Spock',
+            '0': 'Blank'
+        }
         
-        for key in ['r', 'p', 's', '0']:
+        # Display stats for all types that exist on the board
+        for key in sorted(stats['counts'].keys()):
             count = stats['counts'][key]
             percentage = stats['percentages'][key]
             change = stats['changes'][key]
@@ -194,7 +213,8 @@ class Board:
             change_str = f"{change:+d}" if change != 0 else "0"
             change_pct_str = f"({change_pct:+.2f}%)" if change != 0 else "(0.00%)"
             
-            print(f"{labels[key]:10s}: {count:6d} ({percentage:6.2f}%) | Change: {change_str:6s} {change_pct_str}")
+            label = labels.get(key, f"Type {key}")
+            print(f"{label:10s}: {count:6d} ({percentage:6.2f}%) | Change: {change_str:6s} {change_pct_str}")
         
         print("="*60 + "\n")
         
@@ -203,7 +223,7 @@ class Board:
 
 
 class RPSGui:
-    def __init__(self, root, board_height=100, board_width=200, cell_size=5):
+    def __init__(self, root, board_height=100, board_width=228, cell_size=5):
         self.root = root
         self.root.title("Rock Paper Scissors Simulation")
         
@@ -434,7 +454,7 @@ class RPSGui:
     def run_simulation(self):
         if self.running:
             self.update_board()
-            delay = int(1000 / self.speed_var.get())  # Convert speed to delay in ms
+            delay = int(100 / self.speed_var.get())  # Convert speed to delay in ms
             self.root.after(delay, self.run_simulation)
     
     def reset_board(self):
@@ -449,7 +469,7 @@ class RPSGui:
 
 def main():
     root = tk.Tk()
-    app = RPSGui(root, board_height=100, board_width=200, cell_size=5)
+    app = RPSGui(root, board_height=125, board_width=228, cell_size=5)
     root.mainloop()
 
 
