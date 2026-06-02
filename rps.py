@@ -6,7 +6,7 @@ import os
 
 class Cell:
     rules = {
-            'r': {'beats': 'sl', 'beatenBy': 'po'},
+            'r': {'beats': 'ls', 'beatenBy': 'op'},
             'p': {'beats': 'ro', 'beatenBy': 'ls'},
             's': {'beats': 'lp', 'beatenBy': 'or'},
             'l': {'beats': 'op', 'beatenBy': 'sr'},
@@ -287,6 +287,35 @@ class RPSGui:
         loopback_check = ttk.Checkbutton(control_frame, text="Wrap Edges", variable=self.loopback_var, command=self.toggle_loopback)
         loopback_check.pack(side=tk.LEFT, padx=5)
         
+        # Create color key frame
+        key_frame = ttk.Frame(root)
+        key_frame.pack(pady=5)
+        
+        ttk.Label(key_frame, text="Color Key:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT, padx=5)
+        
+        # Define labels for each type
+        type_labels = {
+            'r': 'Rock',
+            'p': 'Paper',
+            's': 'Scissors',
+            'l': 'Lizard',
+            'o': 'Spock',
+            '0': 'Blank'
+        }
+        
+        # Create color key entries
+        for cell_type in ['r', 'p', 's', 'l', 'o', '0']:
+            color = Cell.colors[cell_type]
+            label_text = type_labels[cell_type]
+            
+            # Create a small colored square
+            key_canvas = tk.Canvas(key_frame, width=20, height=20, bg='white', highlightthickness=1, highlightbackground='gray')
+            key_canvas.create_rectangle(2, 2, 18, 18, fill=color, outline='gray')
+            key_canvas.pack(side=tk.LEFT, padx=2)
+            
+            # Create label
+            ttk.Label(key_frame, text=label_text).pack(side=tk.LEFT, padx=(0, 10))
+        
         # Create rectangles for each cell
         self.rectangles = []
         for row in range(board_height):
@@ -441,9 +470,10 @@ class RPSGui:
         
         if combat_mode == "fixed":
             board_reference = self.board.get_copy()
-            for row in range(self.board.get_size()[0]):
-                for cell in range(self.board.get_size()[1]):
-                    self.board.update_cell(row, cell, board_reference)
+            cell_list = [board_reference.board[row][col] for row in range(board_reference.height) for col in range(board_reference.width)]
+            random.shuffle(cell_list)
+            for cell in cell_list:
+                    self.board.update_cell(cell.get_xy()[0], cell.get_xy()[1], board_reference)
                    
         elif combat_mode == "random":
             board_reference = self.board.get_copy()
