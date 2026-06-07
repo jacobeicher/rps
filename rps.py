@@ -5,28 +5,49 @@ import json
 import os
 
 class Cell:
+    # rules = {
+    #         'r': {'beats': 'ls', 'beatenBy': 'op'},
+    #         'p': {'beats': 'ro', 'beatenBy': 'ls'},
+    #         's': {'beats': 'lp', 'beatenBy': 'or'},
+    #         'l': {'beats': 'op', 'beatenBy': 'sr'},
+    #         'o': {'beats': 'rs', 'beatenBy': 'lp'},
+    #         '0': {'beats': '', 'beatenBy': 'rpslo'},
+    #     }
+
     rules = {
-            'r': {'beats': 'ls', 'beatenBy': 'op'},
-            'p': {'beats': 'ro', 'beatenBy': 'ls'},
-            's': {'beats': 'lp', 'beatenBy': 'or'},
-            'l': {'beats': 'op', 'beatenBy': 'sr'},
-            'o': {'beats': 'rs', 'beatenBy': 'lp'},
-            '0': {'beats': '', 'beatenBy': 'rpslo'},
+        'A': {'beats': 'BCE', 'beatenBy': 'DFG'},
+        'B': {'beats': 'CDF', 'beatenBy': 'EGA'},
+        'C': {'beats': 'DEG', 'beatenBy': 'FAB'},
+        'D': {'beats': 'EFA', 'beatenBy': 'GBC'},
+        'E': {'beats': 'FGB', 'beatenBy': 'ACD'},
+        'F': {'beats': 'GAC', 'beatenBy': 'BDE'},
+        'G': {'beats': 'ABD', 'beatenBy': 'CEF'},
+        '0': {'beats': '', 'beatenBy': 'ABCDEFG'},
+        'X': {'beats': '', 'beatenBy': ''}
         }
-    colors =  {
-        'r': '#FFD700',  # Gold
-        'p': '#32CD32',  # Lime Green
-        's': '#4169E1',  # Royal Blue
-        'l': '#FF1493',  # Deep Pink
-        'o': '#00CED1',  # Dark Turquoise
-        '0': '#FFFFFF'   # White
-    }
-    # colors = {
-    #     'r': '#FF4500',  # Red-Orange (OrangeRed)
-    #     'p': '#1E90FF',  # Green (Lime)
-    #     's': '#00FF00',  # Blue (DodgerBlue)
+
+    # colors =  {
+    #     'r': '#FFD700',  # Gold
+    #     'p': '#32CD32',  # Lime Green
+    #     's': '#4169E1',  # Royal Blue
+    #     'l': '#FF1493',  # Deep Pink
+    #     'o': '#00CED1',  # Dark Turquoise
     #     '0': '#FFFFFF'   # White
     # }
+    colors = {
+        'A': '#FF4500',  # Fire - Orange Red
+        'B': '#32CD32',  # Nature - Lime Green
+        'C': '#C0C0C0',  # Metal - Silver
+        'D': '#1E90FF',  # Water - Dodger Blue
+        'E': '#A5B4FC',  # Air - Periwinkle
+        'F': '#8B4513',  # Earth - Saddle Brown
+        'G': '#FFD700',  # Lightning - Gold
+
+        # Utility / special colors
+        '0': '#FFFFFF',  # Empty / Neutral
+        'X': '#2B2B2B',  # Obstacle / Wall
+        'H': '#FF69B4',  # Highlight / Selected
+    }
     
     def __init__(self, x, y, value):
         self.value = value
@@ -69,8 +90,19 @@ class Board:
         self.canvas_loopback = canvas_loopback
         self.mutation_rate = mutation_rate
         self.board = [[Cell(h, w, '0') for w in range(width)] for h in range(height)]
-        self.last_stats = {'r': 0, 'p': 0, 's': 0, '0': 0} 
-        self.types = ['r', 'p','s','l','o']
+        self.last_stats = {'A': 0, 'B': 0, 'C': 0, 'D': 0, 'E': 0, 'F': 0, 'G': 0, '0': 0}
+        self.types = ['A', 'B','C','D','E','F','G']
+        self.labels = {
+        'A': 'Fire',
+        'B': 'Nature',
+        'C': 'Metal',
+        'D': 'Water',
+        'E': 'Air',
+        'F': 'Earth',
+        'G': 'Lightning',
+        '0': 'Blank',
+        'X': 'Obstacle',
+    }
         self.populate_board(initial_value)
 
         if include_blanks:
@@ -203,14 +235,15 @@ class Board:
         print(f"Total Cells: {total_cells}")
         print("-"*60)
         
-        labels = {
-            'r': 'Rock',
-            'p': 'Paper',
-            's': 'Scissors',
-            'l': 'Lizard',
-            'o': 'Spock',
-            '0': 'Blank'
-        }
+        # labels = {
+        #     'r': 'Rock',
+        #     'p': 'Paper',
+        #     's': 'Scissors',
+        #     'l': 'Lizard',
+        #     'o': 'Spock',
+        #     '0': 'Blank'
+        # }
+
         
         # Display stats for all types that exist on the board
         for key in sorted(stats['counts'].keys()):
@@ -222,7 +255,7 @@ class Board:
             change_str = f"{change:+d}" if change != 0 else "0"
             change_pct_str = f"({change_pct:+.2f}%)" if change != 0 else "(0.00%)"
             
-            label = labels.get(key, f"Type {key}")
+            label = self.labels.get(key, f"Type {key}")
             print(f"{label:10s}: {count:6d} ({percentage:6.2f}%) | Change: {change_str:6s} {change_pct_str}")
         
         print("="*60 + "\n")
@@ -293,20 +326,11 @@ class RPSGui:
         
         ttk.Label(key_frame, text="Color Key:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT, padx=5)
         
-        # Define labels for each type
-        type_labels = {
-            'r': 'Rock',
-            'p': 'Paper',
-            's': 'Scissors',
-            'l': 'Lizard',
-            'o': 'Spock',
-            '0': 'Blank'
-        }
         
         # Create color key entries
-        for cell_type in ['r', 'p', 's', 'l', 'o', '0']:
+        for cell_type in self.board.types:
             color = Cell.colors[cell_type]
-            label_text = type_labels[cell_type]
+            label_text =  self.board.labels[cell_type]
             
             # Create a small colored square
             key_canvas = tk.Canvas(key_frame, width=20, height=20, bg='white', highlightthickness=1, highlightbackground='gray')

@@ -1,22 +1,22 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 import json
 import os
 
 class MapEditor:
-    def __init__(self, root, board_height=100, board_width=200, cell_size=5):
+    def __init__(self, root, width=228, height=100, cell_size=5):
         self.root = root
         self.root.title("RPS Map Editor")
         
+        self.width = width
+        self.height = height
         self.cell_size = cell_size
-        self.board_height = board_height
-        self.board_width = board_width
         
         # Initialize board with blank cells
-        self.board = [['0' for _ in range(board_width)] for _ in range(board_height)]
+        self.board = [['0' for _ in range(width)] for _ in range(height)]
         
-        # Current drawing value
-        self.current_value = tk.StringVar(value='r')
+        # Current selected type
+        self.current_type = tk.StringVar(value='A')
         
         # Pen size
         self.pen_size = tk.IntVar(value=1)
@@ -24,32 +24,89 @@ class MapEditor:
         # Drawing state
         self.is_drawing = False
         
-        # Preview state
-        self.preview_items = []
-        
-        # Colors for cell types - updated to match rps.py
+        # Define types and colors matching the main game
+        self.types = ['A', 'B', 'C', 'D', 'E', 'F', 'G', '0', 'X']
         self.colors = {
-            'r': '#FFD700',  # Gold
-            'p': '#32CD32',  # Lime Green
-            's': '#4169E1',  # Royal Blue
-            'l': '#FF1493',  # Deep Pink
-            'o': '#00CED1',  # Dark Turquoise
-            '0': '#FFFFFF'   # White
+            'A': '#FF4500',  # Fire - Orange Red
+            'B': '#32CD32',  # Nature - Lime Green
+            'C': '#C0C0C0',  # Metal - Silver
+            'D': '#1E90FF',  # Water - Dodger Blue
+            'E': '#E6F7FF',  # Air - Pale Sky Blue
+            'F': '#8B4513',  # Earth - Saddle Brown
+            'G': '#FFD700',  # Lightning - Gold
+            '0': '#FFFFFF',  # Empty / Neutral
+            'X': '#2B2B2B',  # Obstacle / Wall
+        }
+        self.labels = {
+            'A': 'Fire',
+            'B': 'Nature',
+            'C': 'Metal',
+            'D': 'Water',
+            'E': 'Air',
+            'F': 'Earth',
+            'G': 'Lightning',
+            '0': 'Blank',
+            'X': 'Obstacle',
         }
         
         self.setup_ui()
-        self.draw_board()
     
     def setup_ui(self):
         # Create main container
         main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Create canvas with scrollbars
+        # Create toolbar
+        toolbar = ttk.Frame(main_frame)
+        toolbar.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+        
+        # File operations
+        ttk.Button(toolbar, text="New", command=self.new_map).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="Load", command=self.load_map).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="Save", command=self.save_map).pack(side=tk.LEFT, padx=2)
+        
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        
+        # Map size button
+        ttk.Button(toolbar, text="Resize Map", command=self.resize_map).pack(side=tk.LEFT, padx=2)
+        
+        # Display current size
+        self.size_label = ttk.Label(toolbar, text=f"Size: {self.width}x{self.height}")
+        self.size_label.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        
+        # Clear and fill operations
+        ttk.Button(toolbar, text="Clear All", command=self.clear_all).pack(side=tk.LEFT, padx=2)
+        ttk.Button(toolbar, text="Fill All", command=self.fill_all).pack(side=tk.LEFT, padx=2)
+        
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        
+        # Pen size control
+        ttk.Label(toolbar, text="Pen Size:").pack(side=tk.LEFT, padx=5)
+        self.pen_size_label = ttk.Label(toolbar, text="1", width=3)
+        self.pen_size_label.pack(side=tk.LEFT)
+        pen_size_slider = ttk.Scale(
+            toolbar,
+            from_=1,
+            to=25,
+            orient=tk.HORIZONTAL,
+            variable=self.pen_size,
+            command=self.update_pen_size_label,
+            length=150
+        )
+        pen_size_slider.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        
+        # Type selector
+        ttk.Label(toolbar, text="Brush:").pack(side=tk.LEFT, padx=5)
+        
+        # Create canvas frame with scrollbars
         canvas_frame = ttk.Frame(main_frame)
-        canvas_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Add scrollbars
+        # Create scrollbars
         v_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL)
         v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
@@ -57,206 +114,178 @@ class MapEditor:
         h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
         
         # Create canvas
-        canvas_width = self.board_width * self.cell_size
-        canvas_height = self.board_height * self.cell_size
+        canvas_width = self.width * self.cell_size
+        canvas_height = self.height * self.cell_size
         self.canvas = tk.Canvas(
             canvas_frame,
-            width=min(canvas_width, 1000),
+            width=min(canvas_width, 1200),
             height=min(canvas_height, 600),
             bg='white',
             scrollregion=(0, 0, canvas_width, canvas_height),
-            yscrollcommand=v_scrollbar.set,
-            xscrollcommand=h_scrollbar.set
+            xscrollcommand=h_scrollbar.set,
+            yscrollcommand=v_scrollbar.set
         )
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         v_scrollbar.config(command=self.canvas.yview)
         h_scrollbar.config(command=self.canvas.xview)
         
-        # Bind mouse events for drawing
+        # Bind mouse events
         self.canvas.bind('<Button-1>', self.start_draw)
         self.canvas.bind('<B1-Motion>', self.draw)
         self.canvas.bind('<ButtonRelease-1>', self.stop_draw)
-        self.canvas.bind('<Motion>', self.show_preview)
-        self.canvas.bind('<Leave>', self.hide_preview)
         
+        # Create palette panel
+        palette_frame = ttk.Frame(main_frame)
+        palette_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
         
-        # Create control frame
-        control_frame = ttk.Frame(main_frame)
-        control_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
+        ttk.Label(palette_frame, text="Palette", font=('Arial', 12, 'bold')).pack(pady=5)
         
-        # Cell type selection with updated options
-        ttk.Label(control_frame, text="Cell Type:").pack(side=tk.LEFT, padx=5)
+        # Create palette buttons
+        for cell_type in self.types:
+            self.create_palette_button(palette_frame, cell_type)
         
-        cell_types = [
-            ('Rock (r)', 'r'),
-            ('Paper (p)', 'p'),
-            ('Scissors (s)', 's'),
-            ('Lizard (l)', 'l'),
-            ('Spock (o)', 'o'),
-            ('Blank (0)', '0')
-        ]
-        
-        for label, value in cell_types:
-            rb = ttk.Radiobutton(
-                control_frame,
-                text=label,
-                variable=self.current_value,
-                value=value
-            )
-            rb.pack(side=tk.LEFT, padx=2)
-        
-        # Pen size control
-        ttk.Label(control_frame, text="Pen Size:").pack(side=tk.LEFT, padx=(10, 5))
-        pen_size_spinbox = ttk.Spinbox(
-            control_frame,
-            from_=1,
-            to=20,
-            textvariable=self.pen_size,
-            width=5,
-            command=self.validate_pen_size
-        )
-        pen_size_spinbox.pack(side=tk.LEFT, padx=2)
-        pen_size_spinbox.bind('<Return>', lambda e: self.validate_pen_size())
-        pen_size_spinbox.bind('<FocusOut>', lambda e: self.validate_pen_size())
-        
-        # Action buttons
-        ttk.Button(control_frame, text="Clear All", command=self.clear_board).pack(side=tk.LEFT, padx=5)
-        ttk.Button(control_frame, text="Save Map", command=self.save_map).pack(side=tk.LEFT, padx=5)
-        ttk.Button(control_frame, text="Load Map", command=self.load_map).pack(side=tk.LEFT, padx=5)
-        
-        # Status label
-        self.status_label = ttk.Label(control_frame, text=f"Board Size: {self.board_width}x{self.board_height}")
-        self.status_label.pack(side=tk.RIGHT, padx=5)
-    
-
-    def show_preview(self, event):
-        """Show preview of pen before drawing"""
-        # Clear previous preview
-        self.hide_preview()
-        
-        center_row, center_col = self.get_cell_from_coords(event.x, event.y)
-        if center_row is None or center_col is None:
-            return
-        
-        # Get pen size and color
-        pen_radius = self.pen_size.get() // 2
-        value = self.current_value.get()
-        color = self.colors.get(value, '#FFFFFF')
-        
-        # Create semi-transparent preview
-        for dr in range(-pen_radius, pen_radius + 1):
-            for dc in range(-pen_radius, pen_radius + 1):
-                row = center_row + dr
-                col = center_col + dc
-                
-                # Check if within bounds
-                if 0 <= row < self.board_height and 0 <= col < self.board_width:
-                    x1 = col * self.cell_size
-                    y1 = row * self.cell_size
-                    x2 = x1 + self.cell_size
-                    y2 = y1 + self.cell_size
-                    
-                    # Create preview rectangle with outline
-                    preview_rect = self.canvas.create_rectangle(
-                        x1, y1, x2, y2,
-                        fill=color,
-                        outline='black',
-                        width=1,
-                        stipple='gray50'  # Makes it semi-transparent
-                    )
-                    self.preview_items.append(preview_rect)
-
-    def hide_preview(self, event=None):
-        """Remove preview items from canvas"""
-        for item in self.preview_items:
-            self.canvas.delete(item)
-        self.preview_items = []
-
-    def validate_pen_size(self):
-        """Validate and clamp pen size to acceptable range"""
-        try:
-            size = self.pen_size.get()
-            if size < 1:
-                self.pen_size.set(1)
-            elif size > 20:
-                self.pen_size.set(20)
-        except tk.TclError:
-            self.pen_size.set(1)
-    
-    def draw_board(self):
-        """Draw the initial board"""
+        # Create rectangles for each cell
         self.rectangles = []
-        for row in range(self.board_height):
+        for row in range(self.height):
             row_rects = []
-            for col in range(self.board_width):
+            for col in range(self.width):
                 x1 = col * self.cell_size
                 y1 = row * self.cell_size
                 x2 = x1 + self.cell_size
                 y2 = y1 + self.cell_size
-                color = self.colors[self.board[row][col]]
-                rect = self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline='gray')
+                rect = self.canvas.create_rectangle(x1, y1, x2, y2, fill='white', outline='gray')
                 row_rects.append(rect)
             self.rectangles.append(row_rects)
-    
-    def get_cell_from_coords(self, x, y):
-        """Convert canvas coordinates to board cell coordinates"""
-        # Adjust for scroll position
-        canvas_x = self.canvas.canvasx(x)
-        canvas_y = self.canvas.canvasy(y)
         
+        self.draw_board()
+    
+    def resize_map(self):
+        """Open dialog to resize the map"""
+        dialog = ResizeDialog(self.root, self.width, self.height)
+        self.root.wait_window(dialog.top)
+        
+        if dialog.result:
+            new_width, new_height = dialog.result
+            
+            if new_width == self.width and new_height == self.height:
+                return
+            
+            # Create new board with new dimensions
+            new_board = [['0' for _ in range(new_width)] for _ in range(new_height)]
+            
+            # Copy existing data (as much as fits)
+            for row in range(min(self.height, new_height)):
+                for col in range(min(self.width, new_width)):
+                    new_board[row][col] = self.board[row][col]
+            
+            # Update dimensions and board
+            self.width = new_width
+            self.height = new_height
+            self.board = new_board
+            
+            # Update size label
+            self.size_label.config(text=f"Size: {self.width}x{self.height}")
+            
+            # Recreate canvas
+            self.recreate_canvas()
+            self.draw_board()
+    
+    def update_pen_size_label(self, value):
+        """Update the pen size label when slider changes"""
+        self.pen_size_label.config(text=str(int(float(value))))
+    
+    def create_palette_button(self, parent, cell_type):
+        """Create a palette button for a cell type"""
+        frame = ttk.Frame(parent)
+        frame.pack(fill=tk.X, pady=2)
+        
+        # Color preview
+        color_canvas = tk.Canvas(frame, width=30, height=30, bg='white', highlightthickness=1, highlightbackground='gray')
+        color_canvas.create_rectangle(2, 2, 28, 28, fill=self.colors[cell_type], outline='gray')
+        color_canvas.pack(side=tk.LEFT, padx=5)
+        
+        # Button
+        btn = ttk.Radiobutton(
+            frame,
+            text=self.labels[cell_type],
+            variable=self.current_type,
+            value=cell_type,
+            width=12
+        )
+        btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+    
+    def get_cell_coords(self, event):
+        """Convert canvas coordinates to cell coordinates"""
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
         col = int(canvas_x // self.cell_size)
         row = int(canvas_y // self.cell_size)
         
-        if 0 <= row < self.board_height and 0 <= col < self.board_width:
+        if 0 <= row < self.height and 0 <= col < self.width:
             return row, col
         return None, None
     
     def start_draw(self, event):
-        """Start drawing when mouse button is pressed"""
-        self.hide_preview()  # Hide preview when starting to draw
+        """Start drawing"""
         self.is_drawing = True
         self.draw(event)
     
     def draw(self, event):
-        """Draw cells as mouse moves"""
+        """Draw on the canvas with pen size"""
         if not self.is_drawing:
             return
         
-        center_row, center_col = self.get_cell_from_coords(event.x, event.y)
-        if center_row is None or center_col is None:
-            return
-        
-        # Draw with pen size
-        pen_radius = self.pen_size.get() // 2
-        value = self.current_value.get()
-        
-        for dr in range(-pen_radius, pen_radius + 1):
-            for dc in range(-pen_radius, pen_radius + 1):
-                row = center_row + dr
-                col = center_col + dc
-                
-                # Check if within bounds
-                if 0 <= row < self.board_height and 0 <= col < self.board_width:
-                    self.set_cell(row, col, value)
+        row, col = self.get_cell_coords(event)
+        if row is not None and col is not None:
+            pen_size = self.pen_size.get()
+            current_type = self.current_type.get()
+            
+            # Calculate the range of cells to paint based on pen size
+            radius = pen_size // 2
+            
+            for dr in range(-radius, radius + 1):
+                for dc in range(-radius, radius + 1):
+                    new_row = row + dr
+                    new_col = col + dc
+                    
+                    # Check if within bounds
+                    if 0 <= new_row < self.height and 0 <= new_col < self.width:
+                        self.board[new_row][new_col] = current_type
+                        self.canvas.itemconfig(
+                            self.rectangles[new_row][new_col],
+                            fill=self.colors[current_type]
+                        )
     
     def stop_draw(self, event):
-        """Stop drawing when mouse button is released"""
+        """Stop drawing"""
         self.is_drawing = False
-        # Show preview again after drawing
-        self.show_preview(event)
-
-    def set_cell(self, row, col, value):
-        """Set a cell to a specific value and update display"""
-        self.board[row][col] = value
-        color = self.colors[value]
-        self.canvas.itemconfig(self.rectangles[row][col], fill=color)
     
-    def clear_board(self):
-        """Clear the entire board"""
-        for row in range(self.board_height):
-            for col in range(self.board_width):
-                self.set_cell(row, col, '0')
+    def draw_board(self):
+        """Redraw the entire board"""
+        for row in range(self.height):
+            for col in range(self.width):
+                color = self.colors[self.board[row][col]]
+                self.canvas.itemconfig(self.rectangles[row][col], fill=color)
+    
+    def new_map(self):
+        """Create a new blank map"""
+        if messagebox.askyesno("New Map", "Create a new blank map? This will clear the current map."):
+            self.board = [['0' for _ in range(self.width)] for _ in range(self.height)]
+            self.draw_board()
+    
+    def clear_all(self):
+        """Clear all cells to blank"""
+        if messagebox.askyesno("Clear All", "Clear all cells to blank?"):
+            self.board = [['0' for _ in range(self.width)] for _ in range(self.height)]
+            self.draw_board()
+    
+    def fill_all(self):
+        """Fill all cells with current type"""
+        current = self.current_type.get()
+        if messagebox.askyesno("Fill All", f"Fill all cells with {self.labels[current]}?"):
+            self.board = [[current for _ in range(self.width)] for _ in range(self.height)]
+            self.draw_board()
     
     def save_map(self):
         """Save the current map to a JSON file"""
@@ -270,8 +299,8 @@ class MapEditor:
         if filename:
             try:
                 map_data = {
-                    'width': self.board_width,
-                    'height': self.board_height,
+                    'width': self.width,
+                    'height': self.height,
                     'board': self.board
                 }
                 
@@ -300,38 +329,133 @@ class MapEditor:
                     raise ValueError("Invalid map file format")
                 
                 # Check if dimensions match
-                if map_data['width'] != self.board_width or map_data['height'] != self.board_height:
+                if map_data['width'] != self.width or map_data['height'] != self.height:
                     if not messagebox.askyesno(
                         "Dimension Mismatch",
-                        f"Map dimensions ({map_data['width']}x{map_data['height']}) "
-                        f"don't match current board ({self.board_width}x{self.board_height}). "
-                        f"Load anyway? (Board will be resized)"
+                        f"Map dimensions ({map_data['width']}x{map_data['height']}) don't match editor dimensions ({self.width}x{self.height}). Load anyway?"
                     ):
                         return
                     
-                    # Update dimensions and recreate board
-                    self.board_width = map_data['width']
-                    self.board_height = map_data['height']
-                    self.canvas.delete("all")
-                    self.board = map_data['board']
-                    self.draw_board()
-                    self.status_label.config(text=f"Board Size: {self.board_width}x{self.board_height}")
-                else:
-                    # Load board data
-                    self.board = map_data['board']
-                    for row in range(self.board_height):
-                        for col in range(self.board_width):
-                            self.set_cell(row, col, self.board[row][col])
+                    # Resize if needed
+                    self.width = map_data['width']
+                    self.height = map_data['height'] 
+                    self.size_label.config(text=f"Size: {self.width}x{self.height}")
+                    self.recreate_canvas()
                 
-                messagebox.showinfo("Success", "Map loaded successfully!")
-                
+                self.board = map_data['board']
+                self.draw_board()
+                messagebox.showinfo("Success", f"Map loaded from {filename}")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to load map: {str(e)}")
+    
+    def recreate_canvas(self):
+        """Recreate the canvas with new dimensions"""
+        # Clear existing rectangles
+        self.canvas.delete("all")
+        
+        # Update canvas scroll region
+        canvas_width = self.width * self.cell_size
+        canvas_height = self.height * self.cell_size
+        self.canvas.config(scrollregion=(0, 0, canvas_width, canvas_height))
+        
+        # Create new rectangles
+        self.rectangles = []
+        for row in range(self.height):
+            row_rects = []
+            for col in range(self.width):
+                x1 = col * self.cell_size
+                y1 = row * self.cell_size
+                x2 = x1 + self.cell_size
+                y2 = y1 + self.cell_size
+                rect = self.canvas.create_rectangle(x1, y1, x2, y2, fill='white', outline='gray')
+                row_rects.append(rect)
+            self.rectangles.append(row_rects)
+
+
+class ResizeDialog:
+    """Dialog for resizing the map"""
+    def __init__(self, parent, current_width, current_height):
+        self.result = None
+        
+        self.top = tk.Toplevel(parent)
+        self.top.title("Resize Map")
+        self.top.transient(parent)
+        self.top.grab_set()
+        
+        # Center the dialog
+        self.top.geometry("300x150")
+        
+        # Width input
+        width_frame = ttk.Frame(self.top)
+        width_frame.pack(pady=10, padx=20, fill=tk.X)
+        
+        ttk.Label(width_frame, text="Width:", width=10).pack(side=tk.LEFT)
+        self.width_var = tk.IntVar(value=current_width)
+        width_spinbox = ttk.Spinbox(
+            width_frame,
+            from_=10,
+            to=1000,
+            textvariable=self.width_var,
+            width=10
+        )
+        width_spinbox.pack(side=tk.LEFT, padx=5)
+        
+        # Height input
+        height_frame = ttk.Frame(self.top)
+        height_frame.pack(pady=10, padx=20, fill=tk.X)
+        
+        ttk.Label(height_frame, text="Height:", width=10).pack(side=tk.LEFT)
+        self.height_var = tk.IntVar(value=current_height)
+        height_spinbox = ttk.Spinbox(
+            height_frame,
+            from_=10,
+            to=1000,
+            textvariable=self.height_var,
+            width=10
+        )
+        height_spinbox.pack(side=tk.LEFT, padx=5)
+        
+        # Buttons
+        button_frame = ttk.Frame(self.top)
+        button_frame.pack(pady=20)
+        
+        ttk.Button(button_frame, text="OK", command=self.ok, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=self.cancel, width=10).pack(side=tk.LEFT, padx=5)
+        
+        # Bind Enter key to OK
+        self.top.bind('<Return>', lambda e: self.ok())
+        self.top.bind('<Escape>', lambda e: self.cancel())
+        
+        # Focus on width input
+        width_spinbox.focus_set()
+    
+    def ok(self):
+        """Handle OK button"""
+        try:
+            width = self.width_var.get()
+            height = self.height_var.get()
+            
+            if width < 10 or width > 1000:
+                messagebox.showerror("Invalid Input", "Width must be between 10 and 1000")
+                return
+            
+            if height < 10 or height > 1000:
+                messagebox.showerror("Invalid Input", "Height must be between 10 and 1000")
+                return
+            
+            self.result = (width, height)
+            self.top.destroy()
+        except tk.TclError:
+            messagebox.showerror("Invalid Input", "Please enter valid numbers")
+    
+    def cancel(self):
+        """Handle Cancel button"""
+        self.top.destroy()
 
 
 def main():
     root = tk.Tk()
-    app = MapEditor(root, board_height=100, board_width=228, cell_size=5)
+    editor = MapEditor(root)
     root.mainloop()
 
 
