@@ -82,7 +82,7 @@ class Cell:
 
 
 class Board:
-    def __init__(self, height=53, width=133, combat_mode="fixed", include_blanks=False, canvas_loopback=False, mutation_rate=0.0, initial_value=None):
+    def __init__(self, height=53, width=133, combat_mode="fixed", include_blanks=False, canvas_loopback=True, mutation_rate=0.0, initial_value=None):
         self.height = height
         self.width = width
         self.combat_mode = combat_mode
@@ -125,16 +125,14 @@ class Board:
 
     def get(self, row, col):
         if self.canvas_loopback:
-            # Wrap around using modulo
             row = row % self.height
             col = col % self.width
             return self.board[row][col]
         else:
-            # Return blank cell if out of bounds
             if not (0 <= row < self.height and 0 <= col < self.width):
-                return Cell(row, col, '0')
+                return Cell(row, col, '0')  # Creates new object!
             return self.board[row][col]
-
+        
     def set(self, row, col, val):
         self.board[row][col].set_value(val)
 
@@ -263,6 +261,26 @@ class Board:
         # Update last stats for next comparison
         self.last_stats = stats['counts'].copy()
 
+    def print_rules(self):
+        """Print the rules showing what beats what"""
+        print("\n" + "="*60)
+        print("GAME RULES - What Beats What")
+        print("="*60)
+        
+        for cell_type in sorted(self.types):
+            label = self.labels.get(cell_type, f"Type {cell_type}")
+            beats = Cell.rules[cell_type]['beats']
+            beaten_by = Cell.rules[cell_type]['beatenBy']
+            
+            # Convert letter codes to labels
+            beats_labels = [self.labels.get(b, b) for b in beats]
+            beaten_by_labels = [self.labels.get(b, b) for b in beaten_by]
+            
+            print(f"\n{label} ({cell_type}):")
+            print(f"  Beats:     {', '.join(beats_labels) if beats_labels else 'Nothing'}")
+            print(f"  Beaten by: {', '.join(beaten_by_labels) if beaten_by_labels else 'Nothing'}")
+        
+        print("\n" + "="*60 + "\n")
 
 class RPSGui:
     def __init__(self, root, board_height=100, board_width=228, cell_size=5):
@@ -271,7 +289,8 @@ class RPSGui:
         
         self.cell_size = cell_size
         self.board = Board(height=board_height, width=board_width)
-        
+        self.previous_board_state = [[None for _ in range(board_width)] for _ in range(board_height)]
+            
         # Create canvas
         canvas_width = board_width * cell_size
         canvas_height = board_height * cell_size
@@ -294,6 +313,9 @@ class RPSGui:
 
         self.load_button = ttk.Button(control_frame, text="Load Map", command=self.load_map)
         self.load_button.pack(side=tk.LEFT, padx=5)
+
+        self.rules_button = ttk.Button(control_frame, text="Show Rules", command=self.show_rules)
+        self.rules_button.pack(side=tk.LEFT, padx=5)
         
         # Speed control
         ttk.Label(control_frame, text="Speed:").pack(side=tk.LEFT, padx=5)
@@ -446,11 +468,17 @@ class RPSGui:
             self.rectangles.append(row_rects)
     
     def draw_board(self):
+        """Only redraw cells that have changed"""
         for row in range(self.board.get_size()[0]):
             for col in range(self.board.get_size()[1]):
                 cell = self.board.get(row, col)
-                color = cell.get_color()
-                self.canvas.itemconfig(self.rectangles[row][col], fill=color)
+                current_value = cell.get_value()
+                
+                # Only update if changed
+                if self.previous_board_state[row][col] != current_value:
+                    color = cell.get_color()
+                    self.canvas.itemconfig(self.rectangles[row][col], fill=color)
+                    self.previous_board_state[row][col] = current_value
     def toggle_loopback(self):
         """Toggle the canvas loopback setting"""
         self.board.canvas_loopback = self.loopback_var.get()
@@ -488,6 +516,10 @@ class RPSGui:
     def show_stats(self):
         """Display statistics in the console"""
         self.board.print_stats()
+    
+    def show_rules(self):
+        """Display game rules in the console"""
+        self.board.print_rules()
     
     def update_board(self):
         combat_mode = self.mode_var.get()
