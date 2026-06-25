@@ -5,6 +5,14 @@ import json
 import os
 from itertools import combinations
 
+
+NEIGHBOR_OFFSETS = tuple(
+    (dr, dc)
+    for dr in range(-1, 2)
+    for dc in range(-1, 2)
+    if not (dr == 0 and dc == 0)
+)
+
 class Cell:
     # rules = {
     #         'r': {'beats': 'ls', 'beatenBy': 'op'},
@@ -94,6 +102,7 @@ class Board:
         self.board = [[Cell(h, w, '0') for w in range(width)] for h in range(height)]
         self.last_stats = {'A': 0, 'B': 0, 'C': 0, 'D': 0, 'E': 0, 'F': 0, 'G': 0, '0': 0}
         self.types = ['A', 'B','C','D','E','F','G']
+        self.blank_cell = Cell(-1, -1, '0')
         self.labels = {
         'A': 'Fire',
         'B': 'Nature',
@@ -132,7 +141,7 @@ class Board:
             return self.board[row][col]
         else:
             if not (0 <= row < self.height and 0 <= col < self.width):
-                return Cell(row, col, '0')  # Creates new object!
+                return self.blank_cell
             return self.board[row][col]
         
     def set(self, row, col, val):
@@ -141,9 +150,12 @@ class Board:
     def get_neighbors(self, row, col):
         return [self.get(row + dr, col + dc) for dr in range(-1, 2) for dc in range(-1, 2) if not (dr == 0 and dc == 0)]
     
+    def snapshot_values(self):
+        return [[cell.value for cell in row] for row in self.board]
+
     def get_copy(self):
         # Create a 2D list of values instead of Cell objects
-        board_values = [[self.board[row][col].get_value() for col in range(self.width)] for row in range(self.height)]
+        board_values = self.snapshot_values()
         return Board(
             height=self.height, 
             width=self.width, 
@@ -154,42 +166,61 @@ class Board:
             protection_factor=self.protection_factor,
             initial_value=board_values
         )
+
     def update_cell(self, row, cell, reference):
-        current_cell = self.get(row, cell)
+        current_cell = self.board[row][cell]
+        current_value = current_cell.value
 
         # Check for mutation first
-        if current_cell.get_value() not in ('0', 'X') and random.random() < self.mutation_rate:
-            # Mutate to a random value
-            current_cell.set_value(random.choice(['A', 'B', 'C', 'D', 'E', 'F', 'G']))
-  
-        
-        # Normal update logic
-        cell_neighbors = reference.get_neighbors(row, cell)
+        if current_value not in ('0', 'X') and random.random() < self.mutation_rate:
+            current_value = random.choice(self.types[:7])
+            current_cell.set_value(current_value)
+
+        current_rules = Cell.rules[current_value]
         losses = 0
         friends = 0
-        losing_types = []  # Track all types that beat this cell
-
-        for neighbor in cell_neighbors:
-            result = current_cell.fight(neighbor)
-            if  result < 0:
-                losses += 1
-                losing_types.append(neighbor.get_value())
-            elif result == 0:
-                friends += 1
+        losing_types = {}
+        if isinstance(reference, Board):
+            for dr, dc in NEIGHBOR_OFFSETS:
+                neighbor_value = reference.get(row + dr, cell + dc).value
+                if neighbor_value in current_rules['beatenBy']:
+                    losses += 1
+                    losing_types[neighbor_value] = losing_types.get(neighbor_value, 0) + 1
+                elif neighbor_value not in current_rules['beats']:
+                    friends += 1
+        elif self.canvas_loopback:
+            for dr, dc in NEIGHBOR_OFFSETS:
+                neighbor_value = reference[(row + dr) % self.height][(cell + dc) % self.width]
+                if neighbor_value in current_rules['beatenBy']:
+                    losses += 1
+                    losing_types[neighbor_value] = losing_types.get(neighbor_value, 0) + 1
+                elif neighbor_value not in current_rules['beats']:
+                    friends += 1
+        else:
+            for dr, dc in NEIGHBOR_OFFSETS:
+                neighbor_row = row + dr
+                neighbor_col = cell + dc
+                if 0 <= neighbor_row < self.height and 0 <= neighbor_col < self.width:
+                    neighbor_value = reference[neighbor_row][neighbor_col]
+                else:
+                    neighbor_value = '0'
+                if neighbor_value in current_rules['beatenBy']:
+                    losses += 1
+                    losing_types[neighbor_value] = losing_types.get(neighbor_value, 0) + 1
+                elif neighbor_value not in current_rules['beats']:
+                    friends += 1
 
         # Blank cells are not protected by neighbors
-        if current_cell.get_value() == '0':
+        if current_value == '0':
             # Blank cells convert if they have any losing neighbors
             if losses > 0:
-                # Choose the most common losing type
-                type = max(set(losing_types), key=losing_types.count)
-                self.set(row, cell, type)
+                winning_type = max(losing_types, key=losing_types.get)
+                self.set(row, cell, winning_type)
         else:
             # Non-blank cells can be protected by neighbors
             if losses > 0 and losses > friends * self.protection_factor:
-                # Choose the most common losing type
-                type = max(set(losing_types), key=losing_types.count)
-                self.set(row, cell, type)
+                winning_type = max(losing_types, key=losing_types.get)
+                self.set(row, cell, winning_type)
 
 
     def get_stats(self):
@@ -339,6 +370,7 @@ class RPSGui:
         self.safe_pen_var = tk.BooleanVar(value=False)
         self.is_drawing = False
         self.loaded_map_data = None
+        self.cell_positions = []
             
         # Create canvas
         canvas_width = board_width * cell_size
@@ -431,17 +463,7 @@ class RPSGui:
         safe_pen_check.pack(side=tk.LEFT, padx=(10, 5))
         
         # Create rectangles for each cell
-        self.rectangles = []
-        for row in range(board_height):
-            row_rects = []
-            for col in range(board_width):
-                x1 = col * cell_size
-                y1 = row * cell_size
-                x2 = x1 + cell_size
-                y2 = y1 + cell_size
-                rect = self.canvas.create_rectangle(x1, y1, x2, y2, fill='white', outline='')
-                row_rects.append(rect)
-            self.rectangles.append(row_rects)
+        self.rebuild_canvas_cells(board_height, board_width)
         
         self.draw_board()
 
@@ -589,11 +611,14 @@ class RPSGui:
                 self.canvas.pack(before=widget, padx=10, pady=10)
                 break
         
-        # Create new rectangles
+        self.rebuild_canvas_cells(new_height, new_width)
+
+    def rebuild_canvas_cells(self, height, width):
         self.rectangles = []
-        for row in range(new_height):
+        self.cell_positions = [(row, col) for row in range(height) for col in range(width)]
+        for row in range(height):
             row_rects = []
-            for col in range(new_width):
+            for col in range(width):
                 x1 = col * self.cell_size
                 y1 = row * self.cell_size
                 x2 = x1 + self.cell_size
@@ -642,16 +667,14 @@ class RPSGui:
     
     def draw_board(self):
         """Only redraw cells that have changed"""
-        for row in range(self.board.get_size()[0]):
-            for col in range(self.board.get_size()[1]):
-                cell = self.board.get(row, col)
-                current_value = cell.get_value()
-                
-                # Only update if changed
-                if self.previous_board_state[row][col] != current_value:
-                    color = cell.get_color()
-                    self.canvas.itemconfig(self.rectangles[row][col], fill=color)
-                    self.previous_board_state[row][col] = current_value
+        for row_index, board_row in enumerate(self.board.board):
+            previous_row = self.previous_board_state[row_index]
+            rectangle_row = self.rectangles[row_index]
+            for col_index, cell in enumerate(board_row):
+                current_value = cell.value
+                if previous_row[col_index] != current_value:
+                    self.canvas.itemconfig(rectangle_row[col_index], fill=cell.get_color())
+                    previous_row[col_index] = current_value
     def toggle_loopback(self):
         """Toggle the canvas loopback setting"""
         self.board.canvas_loopback = self.loopback_var.get()
@@ -688,17 +711,19 @@ class RPSGui:
     
     def update_board(self):
         combat_mode = self.mode_var.get()
-        board_reference = self.board.get_copy() if self.copy_board_var.get() else self.board
-        cell_list = [board_reference.board[row][col] for row in range(board_reference.height) for col in range(board_reference.width)]
+        board_reference = self.board.snapshot_values() if self.copy_board_var.get() else self.board
+        cell_count = len(self.cell_positions)
         
         if combat_mode == "fixed":
-            random.shuffle(cell_list)
-            for cell in cell_list:
-                self.board.update_cell(cell.get_xy()[0], cell.get_xy()[1], board_reference)
+            positions = self.cell_positions[:]
+            random.shuffle(positions)
+            for row, col in positions:
+                self.board.update_cell(row, col, board_reference)
                    
         elif combat_mode == "random":
-            for cell in random.choices(cell_list, k=len(cell_list)):
-                self.board.update_cell(cell.get_xy()[0], cell.get_xy()[1], board_reference)
+            for _ in range(cell_count):
+                row, col = self.cell_positions[random.randrange(cell_count)]
+                self.board.update_cell(row, col, board_reference)
     
         self.draw_board()
     
