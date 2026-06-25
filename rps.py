@@ -91,7 +91,7 @@ class Cell:
 
 
 class Board:
-    def __init__(self, height=53, width=133, combat_mode="fixed", include_blanks=False, canvas_loopback=True, mutation_rate=0.0, protection_factor=0.5, initial_value=None):
+    def __init__(self, height=53, width=133, combat_mode="fixed", include_blanks=False, canvas_loopback=True, mutation_rate=0.0001, protection_factor=0.5, initial_value=None):
         self.height = height
         self.width = width
         self.combat_mode = combat_mode
@@ -413,7 +413,7 @@ class RPSGui:
 
          # Mutation rate control
         ttk.Label(control_frame, text="Mutation %:").pack(side=tk.LEFT, padx=5)
-        self.mutation_var = tk.StringVar(value="0.0")
+        self.mutation_var = tk.StringVar(value="0.01")
         self.mutation_entry = ttk.Entry(control_frame, textvariable=self.mutation_var, width=8)
         self.mutation_entry.pack(side=tk.LEFT, padx=5)
         self.mutation_entry.bind('<Return>', self.update_mutation_rate)

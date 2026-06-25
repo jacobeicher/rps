@@ -26,7 +26,7 @@ class MapEditor:
 
         # Simulation defaults saved with the map and applied by the RPS client.
         self.mode_var = tk.StringVar(value="random")
-        self.mutation_var = tk.StringVar(value="0.00")
+        self.mutation_var = tk.StringVar(value="0.01")
         self.protection_var = tk.StringVar(value="0.50")
         self.loopback_var = tk.BooleanVar(value=True)
         self.copy_board_var = tk.BooleanVar(value=False)
