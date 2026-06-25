@@ -82,13 +82,14 @@ class Cell:
 
 
 class Board:
-    def __init__(self, height=53, width=133, combat_mode="fixed", include_blanks=False, canvas_loopback=True, mutation_rate=0.0, initial_value=None):
+    def __init__(self, height=53, width=133, combat_mode="fixed", include_blanks=False, canvas_loopback=True, mutation_rate=0.0, protection_factor=0.5, initial_value=None):
         self.height = height
         self.width = width
         self.combat_mode = combat_mode
         self.include_blanks = include_blanks
         self.canvas_loopback = canvas_loopback
         self.mutation_rate = mutation_rate
+        self.protection_factor = protection_factor
         self.board = [[Cell(h, w, '0') for w in range(width)] for h in range(height)]
         self.last_stats = {'A': 0, 'B': 0, 'C': 0, 'D': 0, 'E': 0, 'F': 0, 'G': 0, '0': 0}
         self.types = ['A', 'B','C','D','E','F','G']
@@ -103,10 +104,10 @@ class Board:
         '0': 'Blank',
         'X': 'Obstacle',
     }
-        self.populate_board(initial_value)
-
         if include_blanks:
             self.types.append('0')
+
+        self.populate_board(initial_value)
     
     def populate_board(self, initial_value):
         if initial_value is not None:
@@ -149,13 +150,16 @@ class Board:
             include_blanks=self.include_blanks, 
             canvas_loopback=self.canvas_loopback,
             mutation_rate=self.mutation_rate,
+            protection_factor=self.protection_factor,
             initial_value=board_values
         )
-    def update_cell(self, row, cell, reference ):
+    def update_cell(self, row, cell, reference):
+        current_cell = self.get(row, cell)
+
         # Check for mutation first
-        if random.random() < self.mutation_rate:
+        if current_cell.get_value() not in ('0', 'X') and random.random() < self.mutation_rate:
             # Mutate to a random value
-            self.set(row, cell, random.choice(self.types))
+            current_cell.set_value(random.choice(['A', 'B', 'C', 'D', 'E', 'F', 'G']))
   
         
         # Normal update logic
@@ -165,7 +169,7 @@ class Board:
         losing_types = []  # Track all types that beat this cell
 
         for neighbor in cell_neighbors:
-            result = self.get(row, cell).fight(neighbor)
+            result = current_cell.fight(neighbor)
             if  result < 0:
                 losses += 1
                 losing_types.append(neighbor.get_value())
@@ -173,7 +177,7 @@ class Board:
                 friends += 1
 
         # Blank cells are not protected by neighbors
-        if self.get(row, cell).get_value() == '0':
+        if current_cell.get_value() == '0':
             # Blank cells convert if they have any losing neighbors
             if losses > 0:
                 # Choose the most common losing type
@@ -181,7 +185,7 @@ class Board:
                 self.set(row, cell, type)
         else:
             # Non-blank cells can be protected by neighbors
-            if (losses > 0 and losses * 2 > friends):
+            if losses > 0 and losses > friends * self.protection_factor:
                 # Choose the most common losing type
                 type = max(set(losing_types), key=losing_types.count)
                 self.set(row, cell, type)
@@ -336,11 +340,24 @@ class RPSGui:
         self.mutation_entry.pack(side=tk.LEFT, padx=5)
         self.mutation_entry.bind('<Return>', self.update_mutation_rate)
         self.mutation_entry.bind('<FocusOut>', self.update_mutation_rate)
+
+        # Neighbor protection control
+        ttk.Label(control_frame, text="Protection:").pack(side=tk.LEFT, padx=5)
+        self.protection_var = tk.StringVar(value=f"{self.board.protection_factor:.2f}")
+        self.protection_entry = ttk.Entry(control_frame, textvariable=self.protection_var, width=6)
+        self.protection_entry.pack(side=tk.LEFT, padx=5)
+        self.protection_entry.bind('<Return>', self.update_protection_factor)
+        self.protection_entry.bind('<FocusOut>', self.update_protection_factor)
         
         # Canvas loopback toggle
         self.loopback_var = tk.BooleanVar(value=True)
         loopback_check = ttk.Checkbutton(control_frame, text="Wrap Edges", variable=self.loopback_var, command=self.toggle_loopback)
         loopback_check.pack(side=tk.LEFT, padx=5)
+
+        # Board update mode toggle
+        self.copy_board_var = tk.BooleanVar(value=False)
+        copy_board_check = ttk.Checkbutton(control_frame, text="Copy Board", variable=self.copy_board_var)
+        copy_board_check.pack(side=tk.LEFT, padx=5)
         
         # Create color key frame
         key_frame = ttk.Frame(root)
@@ -417,8 +434,22 @@ class RPSGui:
                     self.recreate_canvas(map_data['height'], map_data['width'])
                 
                 # Load the board with preserved settings
-                loopback_state = self.board.canvas_loopback
-                mutation_rate = self.board.mutation_rate
+                settings = map_data.get('settings', {})
+                if not isinstance(settings, dict):
+                    settings = {}
+                loopback_state = bool(settings.get('canvas_loopback', self.board.canvas_loopback))
+                try:
+                    mutation_rate = float(settings.get('mutation_rate', self.board.mutation_rate))
+                except (TypeError, ValueError):
+                    mutation_rate = self.board.mutation_rate
+                mutation_rate = max(0.0, min(1.0, mutation_rate))
+                try:
+                    protection_factor = float(settings.get('protection_factor', self.board.protection_factor))
+                except (TypeError, ValueError):
+                    protection_factor = self.board.protection_factor
+                protection_factor = max(0.0, protection_factor)
+                combat_mode = settings.get('combat_mode', self.mode_var.get())
+                copy_board = settings.get('copy_board', self.copy_board_var.get())
                 
                 self.board = Board(
                     height=map_data['height'],
@@ -426,8 +457,15 @@ class RPSGui:
                     include_blanks=True,
                     canvas_loopback=loopback_state,
                     mutation_rate=mutation_rate,
+                    protection_factor=protection_factor,
                     initial_value=map_data['board']
                 )
+                self.loopback_var.set(loopback_state)
+                self.mutation_var.set(f"{mutation_rate * 100:.2f}")
+                self.protection_var.set(f"{protection_factor:.2f}")
+                if combat_mode in ("fixed", "random"):
+                    self.mode_var.set(combat_mode)
+                self.copy_board_var.set(bool(copy_board))
                 
                 self.draw_board()
                 
@@ -442,6 +480,7 @@ class RPSGui:
         """Recreate canvas with new dimensions"""
         # Destroy old canvas
         self.canvas.destroy()
+        self.previous_board_state = [[None for _ in range(new_width)] for _ in range(new_height)]
         
         # Create new canvas
         canvas_width = new_width * self.cell_size
@@ -484,24 +523,6 @@ class RPSGui:
         self.board.canvas_loopback = self.loopback_var.get()
     
     def update_mutation_rate(self, event=None):
-        """
-        Toggle the canvas loopback (edge wrapping) setting for the simulation board.
-        
-        This method updates the board's canvas_loopback attribute based on the current
-        state of the loopback checkbox variable. When loopback is enabled, cells at the
-        edges of the board will interact with cells on the opposite edge, creating a
-        toroidal topology. When disabled, edge cells treat out-of-bounds neighbors as
-        blank cells.
-        
-        Parameters
-        ----------
-        None
-        
-        Returns
-        -------
-        None
-        """
-        self.board.canvas_loopback = self.loopback_var.get()
         """Update the mutation rate from the entry field"""
         try:
             rate = float(self.mutation_var.get())
@@ -513,6 +534,16 @@ class RPSGui:
             # If invalid input, reset to current rate
             self.mutation_var.set(f"{self.board.mutation_rate * 100:.2f}")
 
+    def update_protection_factor(self, event=None):
+        """Update how strongly friendly neighbors protect non-blank cells."""
+        try:
+            factor = float(self.protection_var.get())
+            factor = max(0.0, factor)
+            self.protection_var.set(f"{factor:.2f}")
+            self.board.protection_factor = factor
+        except ValueError:
+            self.protection_var.set(f"{self.board.protection_factor:.2f}")
+
     def show_stats(self):
         """Display statistics in the console"""
         self.board.print_stats()
@@ -523,19 +554,17 @@ class RPSGui:
     
     def update_board(self):
         combat_mode = self.mode_var.get()
+        board_reference = self.board.get_copy() if self.copy_board_var.get() else self.board
+        cell_list = [board_reference.board[row][col] for row in range(board_reference.height) for col in range(board_reference.width)]
         
         if combat_mode == "fixed":
-            board_reference = self.board.get_copy()
-            cell_list = [board_reference.board[row][col] for row in range(board_reference.height) for col in range(board_reference.width)]
             random.shuffle(cell_list)
             for cell in cell_list:
-                    self.board.update_cell(cell.get_xy()[0], cell.get_xy()[1], board_reference)
+                self.board.update_cell(cell.get_xy()[0], cell.get_xy()[1], board_reference)
                    
         elif combat_mode == "random":
-            board_reference = self.board.get_copy()
-            cell_list = [board_reference.board[row][col] for row in range(board_reference.height) for col in range(board_reference.width)]
             for cell in random.choices(cell_list, k=len(cell_list)):
-                    self.board.update_cell(cell.get_xy()[0], cell.get_xy()[1], board_reference)
+                self.board.update_cell(cell.get_xy()[0], cell.get_xy()[1], board_reference)
     
         self.draw_board()
     
@@ -558,8 +587,9 @@ class RPSGui:
         self.start_button.config(text="Start")
         loopback_state = self.board.canvas_loopback
         mutation_rate = self.board.mutation_rate
+        protection_factor = self.board.protection_factor
         include_blanks = self.board.include_blanks
-        self.board = Board(height=self.board.height, width=self.board.width, include_blanks=include_blanks, canvas_loopback=loopback_state, mutation_rate=mutation_rate)
+        self.board = Board(height=self.board.height, width=self.board.width, include_blanks=include_blanks, canvas_loopback=loopback_state, mutation_rate=mutation_rate, protection_factor=protection_factor)
         self.draw_board()
 
 

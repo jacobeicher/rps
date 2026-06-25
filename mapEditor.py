@@ -1,10 +1,10 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
+from tkinter import ttk, filedialog, messagebox
 import json
 import os
 
 class MapEditor:
-    def __init__(self, root, width=228, height=100, cell_size=5):
+    def __init__(self, root, width=228, height=125, cell_size=5):
         self.root = root
         self.root.title("RPS Map Editor")
         
@@ -23,6 +23,13 @@ class MapEditor:
         
         # Drawing state
         self.is_drawing = False
+
+        # Simulation defaults saved with the map and applied by the RPS client.
+        self.mode_var = tk.StringVar(value="random")
+        self.mutation_var = tk.StringVar(value="0.00")
+        self.protection_var = tk.StringVar(value="0.50")
+        self.loopback_var = tk.BooleanVar(value=True)
+        self.copy_board_var = tk.BooleanVar(value=False)
         
         # Define types and colors matching the main game
         self.types = ['A', 'B', 'C', 'D', 'E', 'F', 'G', '0', 'X']
@@ -31,7 +38,7 @@ class MapEditor:
             'B': '#32CD32',  # Nature - Lime Green
             'C': '#C0C0C0',  # Metal - Silver
             'D': '#1E90FF',  # Water - Dodger Blue
-            'E': '#E6F7FF',  # Air - Pale Sky Blue
+            'E': '#A5B4FC',  # Air - Periwinkle
             'F': '#8B4513',  # Earth - Saddle Brown
             'G': '#FFD700',  # Lightning - Gold
             '0': '#FFFFFF',  # Empty / Neutral
@@ -101,6 +108,32 @@ class MapEditor:
         
         # Type selector
         ttk.Label(toolbar, text="Brush:").pack(side=tk.LEFT, padx=5)
+
+        # Simulation defaults
+        settings_bar = ttk.Frame(main_frame)
+        settings_bar.pack(side=tk.TOP, fill=tk.X, padx=5, pady=(0, 5))
+
+        ttk.Label(settings_bar, text="Mode:").pack(side=tk.LEFT, padx=5)
+        mode_combo = ttk.Combobox(settings_bar, textvariable=self.mode_var, values=["fixed", "random"], state="readonly", width=10)
+        mode_combo.pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(settings_bar, text="Mutation %:").pack(side=tk.LEFT, padx=5)
+        mutation_entry = ttk.Entry(settings_bar, textvariable=self.mutation_var, width=8)
+        mutation_entry.pack(side=tk.LEFT, padx=5)
+        mutation_entry.bind('<Return>', self.update_mutation_rate)
+        mutation_entry.bind('<FocusOut>', self.update_mutation_rate)
+
+        ttk.Label(settings_bar, text="Protection:").pack(side=tk.LEFT, padx=5)
+        protection_entry = ttk.Entry(settings_bar, textvariable=self.protection_var, width=6)
+        protection_entry.pack(side=tk.LEFT, padx=5)
+        protection_entry.bind('<Return>', self.update_protection_factor)
+        protection_entry.bind('<FocusOut>', self.update_protection_factor)
+
+        loopback_check = ttk.Checkbutton(settings_bar, text="Wrap Edges", variable=self.loopback_var)
+        loopback_check.pack(side=tk.LEFT, padx=5)
+
+        copy_board_check = ttk.Checkbutton(settings_bar, text="Copy Board", variable=self.copy_board_var)
+        copy_board_check.pack(side=tk.LEFT, padx=5)
         
         # Create canvas frame with scrollbars
         canvas_frame = ttk.Frame(main_frame)
@@ -194,6 +227,65 @@ class MapEditor:
     def update_pen_size_label(self, value):
         """Update the pen size label when slider changes"""
         self.pen_size_label.config(text=str(int(float(value))))
+
+    def update_mutation_rate(self, event=None):
+        """Validate the saved mutation default as a percentage."""
+        try:
+            rate = float(self.mutation_var.get())
+            rate = max(0.0, min(100.0, rate))
+            self.mutation_var.set(f"{rate:.2f}")
+        except ValueError:
+            self.mutation_var.set("0.00")
+
+    def update_protection_factor(self, event=None):
+        """Validate the saved protection default."""
+        try:
+            factor = float(self.protection_var.get())
+            factor = max(0.0, factor)
+            self.protection_var.set(f"{factor:.2f}")
+        except ValueError:
+            self.protection_var.set("0.50")
+
+    def get_settings(self):
+        """Return simulation defaults in the same units the RPS client uses."""
+        self.update_mutation_rate()
+        self.update_protection_factor()
+        return {
+            'combat_mode': self.mode_var.get(),
+            'mutation_rate': float(self.mutation_var.get()) / 100.0,
+            'protection_factor': float(self.protection_var.get()),
+            'canvas_loopback': self.loopback_var.get(),
+            'copy_board': self.copy_board_var.get()
+        }
+
+    def apply_settings(self, settings):
+        """Apply optional simulation defaults from a loaded map."""
+        if not isinstance(settings, dict):
+            return
+
+        mode = settings.get('combat_mode')
+        if mode in ("fixed", "random"):
+            self.mode_var.set(mode)
+
+        if 'mutation_rate' in settings:
+            try:
+                mutation_percent = max(0.0, min(100.0, float(settings['mutation_rate']) * 100.0))
+                self.mutation_var.set(f"{mutation_percent:.2f}")
+            except (TypeError, ValueError):
+                pass
+
+        if 'protection_factor' in settings:
+            try:
+                protection_factor = max(0.0, float(settings['protection_factor']))
+                self.protection_var.set(f"{protection_factor:.2f}")
+            except (TypeError, ValueError):
+                pass
+
+        if 'canvas_loopback' in settings:
+            self.loopback_var.set(bool(settings['canvas_loopback']))
+
+        if 'copy_board' in settings:
+            self.copy_board_var.set(bool(settings['copy_board']))
     
     def create_palette_button(self, parent, cell_type):
         """Create a palette button for a cell type"""
@@ -301,6 +393,7 @@ class MapEditor:
                 map_data = {
                     'width': self.width,
                     'height': self.height,
+                    'settings': self.get_settings(),
                     'board': self.board
                 }
                 
@@ -343,6 +436,7 @@ class MapEditor:
                     self.recreate_canvas()
                 
                 self.board = map_data['board']
+                self.apply_settings(map_data.get('settings'))
                 self.draw_board()
                 messagebox.showinfo("Success", f"Map loaded from {filename}")
             except Exception as e:
