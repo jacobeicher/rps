@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk
 import json
 import os
+from itertools import combinations
 
 class Cell:
     # rules = {
@@ -39,7 +40,7 @@ class Cell:
         'B': '#32CD32',  # Nature - Lime Green
         'C': '#C0C0C0',  # Metal - Silver
         'D': '#1E90FF',  # Water - Dodger Blue
-        'E': '#A5B4FC',  # Air - Periwinkle
+        'E': '#B084F5',  # Air - Purple
         'F': '#8B4513',  # Earth - Saddle Brown
         'G': '#FFD700',  # Lightning - Gold
 
@@ -283,6 +284,44 @@ class Board:
             print(f"\n{label} ({cell_type}):")
             print(f"  Beats:     {', '.join(beats_labels) if beats_labels else 'Nothing'}")
             print(f"  Beaten by: {', '.join(beaten_by_labels) if beaten_by_labels else 'Nothing'}")
+
+        combat_types = [cell_type for cell_type in self.types if cell_type in Cell.rules and cell_type not in ('0', 'X')]
+
+        print("\n" + "-"*60)
+        print("TRIOS - Balanced 3-Way Paradoxes")
+        print("-"*60)
+
+        found_trio = False
+        for trio in combinations(combat_types, 3):
+            wins = {
+                cell_type: sum(other in Cell.rules[cell_type]['beats'] for other in trio if other != cell_type)
+                for cell_type in trio
+            }
+            losses = {
+                cell_type: sum(other in Cell.rules[cell_type]['beatenBy'] for other in trio if other != cell_type)
+                for cell_type in trio
+            }
+
+            if not all(wins[cell_type] == 1 and losses[cell_type] == 1 for cell_type in trio):
+                continue
+
+            trio_labels = [self.labels.get(cell_type, cell_type) for cell_type in trio]
+
+            takeover_types = [
+                cell_type for cell_type in combat_types
+                if cell_type not in trio and all(member in Cell.rules[cell_type]['beats'] for member in trio)
+            ]
+            if not takeover_types:
+                continue
+
+            found_trio = True
+            takeover_labels = [self.labels.get(cell_type, cell_type) for cell_type in takeover_types]
+
+            print(f"\n{', '.join(trio_labels)}:")
+            print(f"  can be taken over by: {', '.join(takeover_labels)}")
+
+        if not found_trio:
+            print("\nNo balanced trios with a takeover element found.")
         
         print("\n" + "="*60 + "\n")
 
@@ -294,12 +333,19 @@ class RPSGui:
         self.cell_size = cell_size
         self.board = Board(height=board_height, width=board_width)
         self.previous_board_state = [[None for _ in range(board_width)] for _ in range(board_height)]
+        self.paint_types = ['A', 'B', 'C', 'D', 'E', 'F', 'G', '0', 'X']
+        self.current_type = tk.StringVar(value='A')
+        self.pen_size = tk.IntVar(value=8)
+        self.safe_pen_var = tk.BooleanVar(value=False)
+        self.is_drawing = False
+        self.loaded_map_data = None
             
         # Create canvas
         canvas_width = board_width * cell_size
         canvas_height = board_height * cell_size
         self.canvas = tk.Canvas(root, width=canvas_width, height=canvas_height, bg='white')
         self.canvas.pack(padx=10, pady=10)
+        self.bind_canvas_drawing()
         
         # Create control frame
         control_frame = ttk.Frame(root)
@@ -358,26 +404,31 @@ class RPSGui:
         self.copy_board_var = tk.BooleanVar(value=False)
         copy_board_check = ttk.Checkbutton(control_frame, text="Copy Board", variable=self.copy_board_var)
         copy_board_check.pack(side=tk.LEFT, padx=5)
-        
-        # Create color key frame
-        key_frame = ttk.Frame(root)
-        key_frame.pack(pady=5)
-        
-        ttk.Label(key_frame, text="Color Key:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT, padx=5)
-        
-        
-        # Create color key entries
-        for cell_type in self.board.types:
-            color = Cell.colors[cell_type]
-            label_text =  self.board.labels[cell_type]
-            
-            # Create a small colored square
-            key_canvas = tk.Canvas(key_frame, width=20, height=20, bg='white', highlightthickness=1, highlightbackground='gray')
-            key_canvas.create_rectangle(2, 2, 18, 18, fill=color, outline='gray')
-            key_canvas.pack(side=tk.LEFT, padx=2)
-            
-            # Create label
-            ttk.Label(key_frame, text=label_text).pack(side=tk.LEFT, padx=(0, 10))
+
+        # Live painting controls
+        brush_frame = ttk.Frame(root)
+        brush_frame.pack(pady=5)
+
+        ttk.Label(brush_frame, text="Brush:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT, padx=5)
+        for cell_type in self.paint_types:
+            self.create_brush_button(brush_frame, cell_type)
+
+        ttk.Label(brush_frame, text="Pen Size:").pack(side=tk.LEFT, padx=(15, 5))
+        self.pen_size_label = ttk.Label(brush_frame, text=str(self.pen_size.get()), width=3)
+        self.pen_size_label.pack(side=tk.LEFT)
+        pen_size_slider = ttk.Scale(
+            brush_frame,
+            from_=1,
+            to=25,
+            orient=tk.HORIZONTAL,
+            variable=self.pen_size,
+            command=self.update_pen_size_label,
+            length=150
+        )
+        pen_size_slider.pack(side=tk.LEFT, padx=5)
+
+        safe_pen_check = ttk.Checkbutton(brush_frame, text="Safe Pen", variable=self.safe_pen_var)
+        safe_pen_check.pack(side=tk.LEFT, padx=(10, 5))
         
         # Create rectangles for each cell
         self.rectangles = []
@@ -393,6 +444,81 @@ class RPSGui:
             self.rectangles.append(row_rects)
         
         self.draw_board()
+
+    def bind_canvas_drawing(self):
+        """Bind mouse events used for live painting on the simulation canvas."""
+        self.canvas.bind('<Button-1>', self.start_draw)
+        self.canvas.bind('<B1-Motion>', self.draw)
+        self.canvas.bind('<ButtonRelease-1>', self.stop_draw)
+
+    def create_brush_button(self, parent, cell_type):
+        """Create a compact paint brush selector with a color swatch."""
+        frame = ttk.Frame(parent)
+        frame.pack(side=tk.LEFT, padx=2)
+
+        color_canvas = tk.Canvas(frame, width=16, height=16, bg='white', highlightthickness=1, highlightbackground='gray')
+        color_canvas.create_rectangle(2, 2, 14, 14, fill=Cell.colors[cell_type], outline='gray')
+        color_canvas.pack(side=tk.LEFT)
+
+        btn = ttk.Radiobutton(
+            frame,
+            text=self.board.labels[cell_type],
+            variable=self.current_type,
+            value=cell_type,
+            width=9
+        )
+        btn.pack(side=tk.LEFT)
+
+    def update_pen_size_label(self, value):
+        """Keep the visible pen size in sync with the slider."""
+        self.pen_size_label.config(text=str(int(float(value))))
+
+    def get_cell_coords(self, event):
+        """Convert canvas coordinates to board row/column coordinates."""
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+        col = int(canvas_x // self.cell_size)
+        row = int(canvas_y // self.cell_size)
+
+        if 0 <= row < self.board.height and 0 <= col < self.board.width:
+            return row, col
+        return None, None
+
+    def start_draw(self, event):
+        """Start live drawing on the simulation board."""
+        self.is_drawing = True
+        self.draw(event)
+
+    def draw(self, event):
+        """Paint the selected cell type onto the running simulation board."""
+        if not self.is_drawing:
+            return
+
+        row, col = self.get_cell_coords(event)
+        if row is None or col is None:
+            return
+
+        radius = self.pen_size.get() // 2
+        current_type = self.current_type.get()
+
+        for dr in range(-radius, radius + 1):
+            for dc in range(-radius, radius + 1):
+                new_row = row + dr
+                new_col = col + dc
+
+                if 0 <= new_row < self.board.height and 0 <= new_col < self.board.width:
+                    if self.safe_pen_var.get() and self.board.get(new_row, new_col).get_value() == 'X':
+                        continue
+                    self.board.set(new_row, new_col, current_type)
+                    self.canvas.itemconfig(
+                        self.rectangles[new_row][new_col],
+                        fill=Cell.colors[current_type]
+                    )
+                    self.previous_board_state[new_row][new_col] = current_type
+
+    def stop_draw(self, event):
+        """Stop live drawing."""
+        self.is_drawing = False
     
     def load_map(self):
         """Load a custom map from file"""
@@ -433,39 +559,8 @@ class RPSGui:
                     self.board.width = map_data['width']
                     self.recreate_canvas(map_data['height'], map_data['width'])
                 
-                # Load the board with preserved settings
-                settings = map_data.get('settings', {})
-                if not isinstance(settings, dict):
-                    settings = {}
-                loopback_state = bool(settings.get('canvas_loopback', self.board.canvas_loopback))
-                try:
-                    mutation_rate = float(settings.get('mutation_rate', self.board.mutation_rate))
-                except (TypeError, ValueError):
-                    mutation_rate = self.board.mutation_rate
-                mutation_rate = max(0.0, min(1.0, mutation_rate))
-                try:
-                    protection_factor = float(settings.get('protection_factor', self.board.protection_factor))
-                except (TypeError, ValueError):
-                    protection_factor = self.board.protection_factor
-                protection_factor = max(0.0, protection_factor)
-                combat_mode = settings.get('combat_mode', self.mode_var.get())
-                copy_board = settings.get('copy_board', self.copy_board_var.get())
-                
-                self.board = Board(
-                    height=map_data['height'],
-                    width=map_data['width'],
-                    include_blanks=True,
-                    canvas_loopback=loopback_state,
-                    mutation_rate=mutation_rate,
-                    protection_factor=protection_factor,
-                    initial_value=map_data['board']
-                )
-                self.loopback_var.set(loopback_state)
-                self.mutation_var.set(f"{mutation_rate * 100:.2f}")
-                self.protection_var.set(f"{protection_factor:.2f}")
-                if combat_mode in ("fixed", "random"):
-                    self.mode_var.set(combat_mode)
-                self.copy_board_var.set(bool(copy_board))
+                self.loaded_map_data = map_data
+                self.apply_map_data(map_data)
                 
                 self.draw_board()
                 
@@ -486,6 +581,7 @@ class RPSGui:
         canvas_width = new_width * self.cell_size
         canvas_height = new_height * self.cell_size
         self.canvas = tk.Canvas(self.root, width=canvas_width, height=canvas_height, bg='white')
+        self.bind_canvas_drawing()
         
         # Find the control frame and pack canvas before it
         for widget in self.root.winfo_children():
@@ -505,6 +601,44 @@ class RPSGui:
                 rect = self.canvas.create_rectangle(x1, y1, x2, y2, fill='white', outline='')
                 row_rects.append(rect)
             self.rectangles.append(row_rects)
+
+    def apply_map_data(self, map_data):
+        """Load board cells and saved simulation settings from map data."""
+        settings = map_data.get('settings', {})
+        if not isinstance(settings, dict):
+            settings = {}
+
+        loopback_state = bool(settings.get('canvas_loopback', self.board.canvas_loopback))
+        try:
+            mutation_rate = float(settings.get('mutation_rate', self.board.mutation_rate))
+        except (TypeError, ValueError):
+            mutation_rate = self.board.mutation_rate
+        mutation_rate = max(0.0, min(1.0, mutation_rate))
+
+        try:
+            protection_factor = float(settings.get('protection_factor', self.board.protection_factor))
+        except (TypeError, ValueError):
+            protection_factor = self.board.protection_factor
+        protection_factor = max(0.0, protection_factor)
+
+        combat_mode = settings.get('combat_mode', self.mode_var.get())
+        copy_board = settings.get('copy_board', self.copy_board_var.get())
+
+        self.board = Board(
+            height=map_data['height'],
+            width=map_data['width'],
+            include_blanks=True,
+            canvas_loopback=loopback_state,
+            mutation_rate=mutation_rate,
+            protection_factor=protection_factor,
+            initial_value=map_data['board']
+        )
+        self.loopback_var.set(loopback_state)
+        self.mutation_var.set(f"{mutation_rate * 100:.2f}")
+        self.protection_var.set(f"{protection_factor:.2f}")
+        if combat_mode in ("fixed", "random"):
+            self.mode_var.set(combat_mode)
+        self.copy_board_var.set(bool(copy_board))
     
     def draw_board(self):
         """Only redraw cells that have changed"""
@@ -585,11 +719,21 @@ class RPSGui:
     def reset_board(self):
         self.running = False
         self.start_button.config(text="Start")
-        loopback_state = self.board.canvas_loopback
-        mutation_rate = self.board.mutation_rate
-        protection_factor = self.board.protection_factor
-        include_blanks = self.board.include_blanks
-        self.board = Board(height=self.board.height, width=self.board.width, include_blanks=include_blanks, canvas_loopback=loopback_state, mutation_rate=mutation_rate, protection_factor=protection_factor)
+
+        if self.loaded_map_data is not None:
+            self.apply_map_data(self.loaded_map_data)
+        else:
+            blank_board = [['0' for _ in range(self.board.width)] for _ in range(self.board.height)]
+            self.board = Board(
+                height=self.board.height,
+                width=self.board.width,
+                include_blanks=True,
+                canvas_loopback=self.board.canvas_loopback,
+                mutation_rate=self.board.mutation_rate,
+                protection_factor=self.board.protection_factor,
+                initial_value=blank_board
+            )
+
         self.draw_board()
 
 
