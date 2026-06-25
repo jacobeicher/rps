@@ -24,14 +24,14 @@ class Cell:
     #     }
 
     rules = {
-        'A': {'beats': 'BCE', 'beatenBy': 'DFG'},
-        'B': {'beats': 'CDF', 'beatenBy': 'EGA'},
-        'C': {'beats': 'DEG', 'beatenBy': 'FAB'},
-        'D': {'beats': 'EFA', 'beatenBy': 'GBC'},
-        'E': {'beats': 'FGB', 'beatenBy': 'ACD'},
-        'F': {'beats': 'GAC', 'beatenBy': 'BDE'},
-        'G': {'beats': 'ABD', 'beatenBy': 'CEF'},
-        '0': {'beats': '', 'beatenBy': 'ABCDEFG'},
+        'F': {'beats': 'NMA', 'beatenBy': 'WEL'},
+        'N': {'beats': 'MWE', 'beatenBy': 'ALF'},
+        'M': {'beats': 'WAL', 'beatenBy': 'EFN'},
+        'W': {'beats': 'AEF', 'beatenBy': 'LNM'},
+        'A': {'beats': 'ELN', 'beatenBy': 'FMW'},
+        'E': {'beats': 'LFM', 'beatenBy': 'NWA'},
+        'L': {'beats': 'FNW', 'beatenBy': 'MAE'},
+        '0': {'beats': '', 'beatenBy': 'FNMWAEL'},
         'X': {'beats': '', 'beatenBy': ''}
         }
 
@@ -44,13 +44,13 @@ class Cell:
     #     '0': '#FFFFFF'   # White
     # }
     colors = {
-        'A': '#FF4500',  # Fire - Orange Red
-        'B': '#32CD32',  # Nature - Lime Green
-        'C': '#C0C0C0',  # Metal - Silver
-        'D': '#1E90FF',  # Water - Dodger Blue
-        'E': '#B084F5',  # Air - Purple
-        'F': '#8B4513',  # Earth - Saddle Brown
-        'G': '#FFD700',  # Lightning - Gold
+        'F': '#FF4500',  # Fire - Orange Red
+        'N': '#32CD32',  # Nature - Lime Green
+        'M': '#C0C0C0',  # Metal - Silver
+        'W': '#1E90FF',  # Water - Dodger Blue
+        'A': '#B084F5',  # Air - Purple
+        'E': '#8B4513',  # Earth - Saddle Brown
+        'L': '#FFD700',  # Lightning - Gold
 
         # Utility / special colors
         '0': '#FFFFFF',  # Empty / Neutral
@@ -100,17 +100,17 @@ class Board:
         self.mutation_rate = mutation_rate
         self.protection_factor = protection_factor
         self.board = [[Cell(h, w, '0') for w in range(width)] for h in range(height)]
-        self.last_stats = {'A': 0, 'B': 0, 'C': 0, 'D': 0, 'E': 0, 'F': 0, 'G': 0, '0': 0}
-        self.types = ['A', 'B','C','D','E','F','G']
+        self.last_stats = {'F': 0, 'N': 0, 'M': 0, 'W': 0, 'A': 0, 'E': 0, 'L': 0, '0': 0}
+        self.types = ['F', 'N', 'M', 'W', 'A', 'E', 'L']
         self.blank_cell = Cell(-1, -1, '0')
         self.labels = {
-        'A': 'Fire',
-        'B': 'Nature',
-        'C': 'Metal',
-        'D': 'Water',
-        'E': 'Air',
-        'F': 'Earth',
-        'G': 'Lightning',
+        'F': 'Fire',
+        'N': 'Nature',
+        'M': 'Metal',
+        'W': 'Water',
+        'A': 'Air',
+        'E': 'Earth',
+        'L': 'Lightning',
         '0': 'Blank',
         'X': 'Obstacle',
     }
@@ -364,8 +364,8 @@ class RPSGui:
         self.cell_size = cell_size
         self.board = Board(height=board_height, width=board_width)
         self.previous_board_state = [[None for _ in range(board_width)] for _ in range(board_height)]
-        self.paint_types = ['A', 'B', 'C', 'D', 'E', 'F', 'G', '0', 'X']
-        self.current_type = tk.StringVar(value='A')
+        self.paint_types = ['F', 'N', 'M', 'W', 'A', 'E', 'L', '0', 'X']
+        self.current_type = tk.StringVar(value='F')
         self.pen_size = tk.IntVar(value=8)
         self.safe_pen_var = tk.BooleanVar(value=False)
         self.is_drawing = False

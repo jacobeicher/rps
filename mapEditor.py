@@ -16,7 +16,7 @@ class MapEditor:
         self.board = [['0' for _ in range(width)] for _ in range(height)]
         
         # Current selected type
-        self.current_type = tk.StringVar(value='A')
+        self.current_type = tk.StringVar(value='F')
         
         # Pen size
         self.pen_size = tk.IntVar(value=1)
@@ -32,26 +32,26 @@ class MapEditor:
         self.copy_board_var = tk.BooleanVar(value=False)
         
         # Define types and colors matching the main game
-        self.types = ['A', 'B', 'C', 'D', 'E', 'F', 'G', '0', 'X']
+        self.types = ['F', 'N', 'M', 'W', 'A', 'E', 'L', '0', 'X']
         self.colors = {
-            'A': '#FF4500',  # Fire - Orange Red
-            'B': '#32CD32',  # Nature - Lime Green
-            'C': '#C0C0C0',  # Metal - Silver
-            'D': '#1E90FF',  # Water - Dodger Blue
-            'E': '#A5B4FC',  # Air - Periwinkle
-            'F': '#8B4513',  # Earth - Saddle Brown
-            'G': '#FFD700',  # Lightning - Gold
+            'F': '#FF4500',  # Fire - Orange Red
+            'N': '#32CD32',  # Nature - Lime Green
+            'M': '#C0C0C0',  # Metal - Silver
+            'W': '#1E90FF',  # Water - Dodger Blue
+            'A': '#B084F5',  # Air - Purple
+            'E': '#8B4513',  # Earth - Saddle Brown
+            'L': '#FFD700',  # Lightning - Gold
             '0': '#FFFFFF',  # Empty / Neutral
             'X': '#2B2B2B',  # Obstacle / Wall
         }
         self.labels = {
-            'A': 'Fire',
-            'B': 'Nature',
-            'C': 'Metal',
-            'D': 'Water',
-            'E': 'Air',
-            'F': 'Earth',
-            'G': 'Lightning',
+            'F': 'Fire',
+            'N': 'Nature',
+            'M': 'Metal',
+            'W': 'Water',
+            'A': 'Air',
+            'E': 'Earth',
+            'L': 'Lightning',
             '0': 'Blank',
             'X': 'Obstacle',
         }

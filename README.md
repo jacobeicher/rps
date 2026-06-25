@@ -15,14 +15,14 @@ The simulation uses seven combat types plus two utility tiles:
 
 | Symbol | Name | Color | Beats | Beaten By |
 | --- | --- | --- | --- | --- |
-| `A` | Fire | `#FF4500` | `B C E` | `D F G` |
-| `B` | Nature | `#32CD32` | `C D F` | `E G A` |
-| `C` | Metal | `#C0C0C0` | `D E G` | `F A B` |
-| `D` | Water | `#1E90FF` | `E F A` | `G B C` |
-| `E` | Air | `#B084F5` | `F G B` | `A C D` |
-| `F` | Earth | `#8B4513` | `G A C` | `B D E` |
-| `G` | Lightning | `#FFD700` | `A B D` | `C E F` |
-| `0` | Blank | `#FFFFFF` | none | `A B C D E F G` |
+| `F` | Fire | `#FF4500` | `N M A` | `W E L` |
+| `N` | Nature | `#32CD32` | `M W E` | `A L F` |
+| `M` | Metal | `#C0C0C0` | `W A L` | `E F N` |
+| `W` | Water | `#1E90FF` | `A E F` | `L N M` |
+| `A` | Air | `#B084F5` | `E L N` | `F M W` |
+| `E` | Earth | `#8B4513` | `L F M` | `N W A` |
+| `L` | Lightning | `#FFD700` | `F N W` | `M A E` |
+| `0` | Blank | `#FFFFFF` | none | `F N M W A E L` |
 | `X` | Obstacle | `#2B2B2B` | none | none |
 
 ## Simulation Behavior
@@ -100,8 +100,8 @@ Saved maps are JSON files with this structure:
   "width": 228,
   "height": 125,
   "board": [
-    ["0", "0", "A"],
-    ["X", "B", "C"]
+    ["0", "0", "F"],
+    ["X", "N", "M"]
   ],
   "settings": {
     "combat_mode": "random",
