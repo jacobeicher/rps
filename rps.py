@@ -370,11 +370,9 @@ class RPSGui:
         self.safe_pen_var = tk.BooleanVar(value=False)
         self.is_drawing = False
         self.loaded_map_data = None
-<<<<<<< Updated upstream
         self.cell_positions = []
-=======
+        
         self.stats_var = tk.StringVar(value="")
->>>>>>> Stashed changes
             
         # Create canvas
         canvas_width = board_width * cell_size
@@ -700,7 +698,6 @@ class RPSGui:
     
     def draw_board(self):
         """Only redraw cells that have changed"""
-<<<<<<< Updated upstream
         for row_index, board_row in enumerate(self.board.board):
             previous_row = self.previous_board_state[row_index]
             rectangle_row = self.rectangles[row_index]
@@ -709,21 +706,6 @@ class RPSGui:
                 if previous_row[col_index] != current_value:
                     self.canvas.itemconfig(rectangle_row[col_index], fill=cell.get_color())
                     previous_row[col_index] = current_value
-=======
-        for row in range(self.board.get_size()[0]):
-            for col in range(self.board.get_size()[1]):
-                cell = self.board.get(row, col)
-                current_value = cell.get_value()
-                
-                # Only update if changed
-                if self.previous_board_state[row][col] != current_value:
-                    color = cell.get_color()
-                    self.canvas.itemconfig(self.rectangles[row][col], fill=color)
-                    self.previous_board_state[row][col] = current_value
-
-        self.update_stats_display()
-
->>>>>>> Stashed changes
     def toggle_loopback(self):
         """Toggle the canvas loopback setting"""
         self.board.canvas_loopback = self.loopback_var.get()
