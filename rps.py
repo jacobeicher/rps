@@ -697,7 +697,7 @@ class RPSGui:
         self.stats_var.set(" | ".join(parts) if parts else "No elements present")
     
     def draw_board(self):
-        """Only redraw cells that have changed"""
+        """Redraw changed cells and refresh the live percentage display."""
         for row_index, board_row in enumerate(self.board.board):
             previous_row = self.previous_board_state[row_index]
             rectangle_row = self.rectangles[row_index]
@@ -706,6 +706,7 @@ class RPSGui:
                 if previous_row[col_index] != current_value:
                     self.canvas.itemconfig(rectangle_row[col_index], fill=cell.get_color())
                     previous_row[col_index] = current_value
+        self.update_stats_display()
     def toggle_loopback(self):
         """Toggle the canvas loopback setting"""
         self.board.canvas_loopback = self.loopback_var.get()
