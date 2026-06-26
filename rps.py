@@ -370,7 +370,11 @@ class RPSGui:
         self.safe_pen_var = tk.BooleanVar(value=False)
         self.is_drawing = False
         self.loaded_map_data = None
+<<<<<<< Updated upstream
         self.cell_positions = []
+=======
+        self.stats_var = tk.StringVar(value="")
+>>>>>>> Stashed changes
             
         # Create canvas
         canvas_width = board_width * cell_size
@@ -461,6 +465,10 @@ class RPSGui:
 
         safe_pen_check = ttk.Checkbutton(brush_frame, text="Safe Pen", variable=self.safe_pen_var)
         safe_pen_check.pack(side=tk.LEFT, padx=(10, 5))
+
+        stats_frame = ttk.Frame(root)
+        stats_frame.pack(pady=(0, 5))
+        ttk.Label(stats_frame, textvariable=self.stats_var).pack(side=tk.LEFT, padx=5)
         
         # Create rectangles for each cell
         self.rebuild_canvas_cells(board_height, board_width)
@@ -537,6 +545,8 @@ class RPSGui:
                         fill=Cell.colors[current_type]
                     )
                     self.previous_board_state[new_row][new_col] = current_type
+
+        self.update_stats_display()
 
     def stop_draw(self, event):
         """Stop live drawing."""
@@ -664,9 +674,33 @@ class RPSGui:
         if combat_mode in ("fixed", "random"):
             self.mode_var.set(combat_mode)
         self.copy_board_var.set(bool(copy_board))
+
+    def update_stats_display(self):
+        """Show current board percentages for combat elements that are present."""
+        counts = {cell_type: 0 for cell_type in self.paint_types}
+        total_cells = self.board.height * self.board.width
+
+        for row in range(self.board.height):
+            for col in range(self.board.width):
+                cell_value = self.board.get(row, col).get_value()
+                counts[cell_value] = counts.get(cell_value, 0) + 1
+
+        parts = []
+        for cell_type in self.paint_types:
+            if cell_type in ('0', 'X'):
+                continue
+
+            count = counts.get(cell_type, 0)
+            if count > 0:
+                label = self.board.labels.get(cell_type, cell_type)
+                percentage = (count / total_cells) * 100
+                parts.append(f"{label}: {percentage:.1f}%")
+
+        self.stats_var.set(" | ".join(parts) if parts else "No elements present")
     
     def draw_board(self):
         """Only redraw cells that have changed"""
+<<<<<<< Updated upstream
         for row_index, board_row in enumerate(self.board.board):
             previous_row = self.previous_board_state[row_index]
             rectangle_row = self.rectangles[row_index]
@@ -675,6 +709,21 @@ class RPSGui:
                 if previous_row[col_index] != current_value:
                     self.canvas.itemconfig(rectangle_row[col_index], fill=cell.get_color())
                     previous_row[col_index] = current_value
+=======
+        for row in range(self.board.get_size()[0]):
+            for col in range(self.board.get_size()[1]):
+                cell = self.board.get(row, col)
+                current_value = cell.get_value()
+                
+                # Only update if changed
+                if self.previous_board_state[row][col] != current_value:
+                    color = cell.get_color()
+                    self.canvas.itemconfig(self.rectangles[row][col], fill=color)
+                    self.previous_board_state[row][col] = current_value
+
+        self.update_stats_display()
+
+>>>>>>> Stashed changes
     def toggle_loopback(self):
         """Toggle the canvas loopback setting"""
         self.board.canvas_loopback = self.loopback_var.get()
