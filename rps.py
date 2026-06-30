@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk
 import json
 import os
+import time
 from itertools import combinations
 
 
@@ -99,7 +100,7 @@ class Board:
         self.canvas_loopback = canvas_loopback
         self.mutation_rate = mutation_rate
         self.protection_factor = protection_factor
-        self.board = [[Cell(h, w, '0') for w in range(width)] for h in range(height)]
+        self.board = [['0' for _ in range(width)] for _ in range(height)]
         self.last_stats = {'F': 0, 'N': 0, 'M': 0, 'W': 0, 'A': 0, 'E': 0, 'L': 0, '0': 0}
         self.types = ['F', 'N', 'M', 'W', 'A', 'E', 'L']
         self.blank_cell = Cell(-1, -1, '0')
@@ -123,13 +124,13 @@ class Board:
         if initial_value is not None:
             for row in range(self.height):
                 for cell in range(self.width):
-                    self.board[row][cell].set_value(initial_value[row][cell])
+                    self.board[row][cell] = initial_value[row][cell]
             return
         
         choices = range(len(self.types))
         for row in range(self.height):
             for cell in range(self.width):
-                self.board[row][cell].set_value(self.types[random.choice(choices)])
+                self.board[row][cell] = self.types[random.choice(choices)]
     
     def get_size(self):
         return (self.height, self.width)
@@ -138,20 +139,20 @@ class Board:
         if self.canvas_loopback:
             row = row % self.height
             col = col % self.width
-            return self.board[row][col]
+            return Cell(row, col, self.board[row][col])
         else:
             if not (0 <= row < self.height and 0 <= col < self.width):
                 return self.blank_cell
-            return self.board[row][col]
+            return Cell(row, col, self.board[row][col])
         
     def set(self, row, col, val):
-        self.board[row][col].set_value(val)
+        self.board[row][col] = val
 
     def get_neighbors(self, row, col):
         return [self.get(row + dr, col + dc) for dr in range(-1, 2) for dc in range(-1, 2) if not (dr == 0 and dc == 0)]
     
     def snapshot_values(self):
-        return [[cell.value for cell in row] for row in self.board]
+        return [row[:] for row in self.board]
 
     def get_copy(self):
         # Create a 2D list of values instead of Cell objects
@@ -168,33 +169,55 @@ class Board:
         )
 
     def update_cell(self, row, cell, reference):
-        current_cell = self.board[row][cell]
-        current_value = current_cell.value
+        current_value = self.board[row][cell]
 
         # Check for mutation first
         if current_value not in ('0', 'X') and random.random() < self.mutation_rate:
             current_value = random.choice(self.types[:7])
-            current_cell.set_value(current_value)
+            self.board[row][cell] = current_value
 
         current_rules = Cell.rules[current_value]
+        beaten_by = current_rules['beatenBy']
+        beats = current_rules['beats']
         losses = 0
         friends = 0
         losing_types = {}
         if isinstance(reference, Board):
-            for dr, dc in NEIGHBOR_OFFSETS:
-                neighbor_value = reference.get(row + dr, cell + dc).value
-                if neighbor_value in current_rules['beatenBy']:
-                    losses += 1
-                    losing_types[neighbor_value] = losing_types.get(neighbor_value, 0) + 1
-                elif neighbor_value not in current_rules['beats']:
-                    friends += 1
+            reference_board = reference.board
+            reference_height = reference.height
+            reference_width = reference.width
+            if reference.canvas_loopback:
+                for dr, dc in NEIGHBOR_OFFSETS:
+                    neighbor_value = reference_board[
+                        (row + dr) % reference_height
+                    ][
+                        (cell + dc) % reference_width
+                    ]
+                    if neighbor_value in beaten_by:
+                        losses += 1
+                        losing_types[neighbor_value] = losing_types.get(neighbor_value, 0) + 1
+                    elif neighbor_value not in beats:
+                        friends += 1
+            else:
+                for dr, dc in NEIGHBOR_OFFSETS:
+                    neighbor_row = row + dr
+                    neighbor_col = cell + dc
+                    if 0 <= neighbor_row < reference_height and 0 <= neighbor_col < reference_width:
+                        neighbor_value = reference_board[neighbor_row][neighbor_col]
+                    else:
+                        neighbor_value = '0'
+                    if neighbor_value in beaten_by:
+                        losses += 1
+                        losing_types[neighbor_value] = losing_types.get(neighbor_value, 0) + 1
+                    elif neighbor_value not in beats:
+                        friends += 1
         elif self.canvas_loopback:
             for dr, dc in NEIGHBOR_OFFSETS:
                 neighbor_value = reference[(row + dr) % self.height][(cell + dc) % self.width]
-                if neighbor_value in current_rules['beatenBy']:
+                if neighbor_value in beaten_by:
                     losses += 1
                     losing_types[neighbor_value] = losing_types.get(neighbor_value, 0) + 1
-                elif neighbor_value not in current_rules['beats']:
+                elif neighbor_value not in beats:
                     friends += 1
         else:
             for dr, dc in NEIGHBOR_OFFSETS:
@@ -204,10 +227,10 @@ class Board:
                     neighbor_value = reference[neighbor_row][neighbor_col]
                 else:
                     neighbor_value = '0'
-                if neighbor_value in current_rules['beatenBy']:
+                if neighbor_value in beaten_by:
                     losses += 1
                     losing_types[neighbor_value] = losing_types.get(neighbor_value, 0) + 1
-                elif neighbor_value not in current_rules['beats']:
+                elif neighbor_value not in beats:
                     friends += 1
 
         # Blank cells are not protected by neighbors
@@ -234,7 +257,7 @@ class Board:
         
         for row in range(self.height):
             for col in range(self.width):
-                cell_value = self.get(row, col).get_value()
+                cell_value = self.board[row][col]
                 if cell_value in stats:
                     stats[cell_value] += 1
                 else:
@@ -363,7 +386,6 @@ class RPSGui:
         
         self.cell_size = cell_size
         self.board = Board(height=board_height, width=board_width)
-        self.previous_board_state = [[None for _ in range(board_width)] for _ in range(board_height)]
         self.paint_types = ['F', 'N', 'M', 'W', 'A', 'E', 'L', '0', 'X']
         self.current_type = tk.StringVar(value='F')
         self.pen_size = tk.IntVar(value=8)
@@ -371,6 +393,18 @@ class RPSGui:
         self.is_drawing = False
         self.loaded_map_data = None
         self.cell_positions = []
+        self.board_image = None
+        self.board_image_item = None
+        self.frame_header = b''
+        self.next_frame_time = None
+        self.render_colors = {
+            cell_type: self.hex_to_rgb_bytes(color)
+            for cell_type, color in Cell.colors.items()
+        }
+        self.render_cell_runs = {
+            cell_type: color * self.cell_size
+            for cell_type, color in self.render_colors.items()
+        }
         
         self.stats_var = tk.StringVar(value="")
             
@@ -401,11 +435,21 @@ class RPSGui:
         self.rules_button = ttk.Button(control_frame, text="Show Rules", command=self.show_rules)
         self.rules_button.pack(side=tk.LEFT, padx=5)
         
-        # Speed control
-        ttk.Label(control_frame, text="Speed:").pack(side=tk.LEFT, padx=5)
-        self.speed_var = tk.IntVar(value=50)
-        self.speed_scale = ttk.Scale(control_frame, from_=1, to=100, variable=self.speed_var, orient=tk.HORIZONTAL, length=200)
+        # Frame-rate control
+        ttk.Label(control_frame, text="FPS:").pack(side=tk.LEFT, padx=5)
+        self.fps_var = tk.IntVar(value=15)
+        self.fps_label_var = tk.StringVar(value=str(self.fps_var.get()))
+        self.speed_scale = ttk.Scale(
+            control_frame,
+            from_=1,
+            to=60,
+            variable=self.fps_var,
+            orient=tk.HORIZONTAL,
+            command=self.update_fps_label,
+            length=200
+        )
         self.speed_scale.pack(side=tk.LEFT, padx=5)
+        ttk.Label(control_frame, textvariable=self.fps_label_var, width=3).pack(side=tk.LEFT)
         
         # Combat mode selection
         ttk.Label(control_frame, text="Mode:").pack(side=tk.LEFT, padx=5)
@@ -468,8 +512,8 @@ class RPSGui:
         stats_frame.pack(pady=(0, 5))
         ttk.Label(stats_frame, textvariable=self.stats_var).pack(side=tk.LEFT, padx=5)
         
-        # Create rectangles for each cell
-        self.rebuild_canvas_cells(board_height, board_width)
+        # Create one image-backed canvas item for the whole board.
+        self.rebuild_board_image(board_height, board_width)
         
         self.draw_board()
 
@@ -500,6 +544,10 @@ class RPSGui:
     def update_pen_size_label(self, value):
         """Keep the visible pen size in sync with the slider."""
         self.pen_size_label.config(text=str(int(float(value))))
+
+    def update_fps_label(self, value):
+        """Keep the visible target FPS in sync with the slider."""
+        self.fps_label_var.set(str(int(float(value))))
 
     def get_cell_coords(self, event):
         """Convert canvas coordinates to board row/column coordinates."""
@@ -535,16 +583,11 @@ class RPSGui:
                 new_col = col + dc
 
                 if 0 <= new_row < self.board.height and 0 <= new_col < self.board.width:
-                    if self.safe_pen_var.get() and self.board.get(new_row, new_col).get_value() == 'X':
+                    if self.safe_pen_var.get() and self.board.board[new_row][new_col] == 'X':
                         continue
                     self.board.set(new_row, new_col, current_type)
-                    self.canvas.itemconfig(
-                        self.rectangles[new_row][new_col],
-                        fill=Cell.colors[current_type]
-                    )
-                    self.previous_board_state[new_row][new_col] = current_type
 
-        self.update_stats_display()
+        self.draw_board()
 
     def stop_draw(self, event):
         """Stop live drawing."""
@@ -605,8 +648,6 @@ class RPSGui:
         """Recreate canvas with new dimensions"""
         # Destroy old canvas
         self.canvas.destroy()
-        self.previous_board_state = [[None for _ in range(new_width)] for _ in range(new_height)]
-        
         # Create new canvas
         canvas_width = new_width * self.cell_size
         canvas_height = new_height * self.cell_size
@@ -619,21 +660,30 @@ class RPSGui:
                 self.canvas.pack(before=widget, padx=10, pady=10)
                 break
         
-        self.rebuild_canvas_cells(new_height, new_width)
+        self.rebuild_board_image(new_height, new_width)
 
-    def rebuild_canvas_cells(self, height, width):
-        self.rectangles = []
+    def rebuild_board_image(self, height, width):
         self.cell_positions = [(row, col) for row in range(height) for col in range(width)]
-        for row in range(height):
-            row_rects = []
-            for col in range(width):
-                x1 = col * self.cell_size
-                y1 = row * self.cell_size
-                x2 = x1 + self.cell_size
-                y2 = y1 + self.cell_size
-                rect = self.canvas.create_rectangle(x1, y1, x2, y2, fill='white', outline='')
-                row_rects.append(rect)
-            self.rectangles.append(row_rects)
+        image_width = width * self.cell_size
+        image_height = height * self.cell_size
+        self.frame_header = f"P6\n{image_width} {image_height}\n255\n".encode('ascii')
+        self.board_image = tk.PhotoImage(
+            width=image_width,
+            height=image_height
+        )
+        self.board_image_item = self.canvas.create_image(
+            0,
+            0,
+            image=self.board_image,
+            anchor=tk.NW
+        )
+
+    def hex_to_rgb_bytes(self, color):
+        color = color.lstrip('#')
+        return bytes(
+            int(color[index:index + 2], 16)
+            for index in range(0, 6, 2)
+        )
 
     def apply_map_data(self, map_data):
         """Load board cells and saved simulation settings from map data."""
@@ -673,15 +723,16 @@ class RPSGui:
             self.mode_var.set(combat_mode)
         self.copy_board_var.set(bool(copy_board))
 
-    def update_stats_display(self):
+    def update_stats_display(self, counts=None):
         """Show current board percentages for combat elements that are present."""
-        counts = {cell_type: 0 for cell_type in self.paint_types}
         total_cells = self.board.height * self.board.width
 
-        for row in range(self.board.height):
-            for col in range(self.board.width):
-                cell_value = self.board.get(row, col).get_value()
-                counts[cell_value] = counts.get(cell_value, 0) + 1
+        if counts is None:
+            counts = {cell_type: 0 for cell_type in self.paint_types}
+            for row in range(self.board.height):
+                for col in range(self.board.width):
+                    cell_value = self.board.board[row][col]
+                    counts[cell_value] = counts.get(cell_value, 0) + 1
 
         parts = []
         for cell_type in self.paint_types:
@@ -697,16 +748,21 @@ class RPSGui:
         self.stats_var.set(" | ".join(parts) if parts else "No elements present")
     
     def draw_board(self):
-        """Redraw changed cells and refresh the live percentage display."""
-        for row_index, board_row in enumerate(self.board.board):
-            previous_row = self.previous_board_state[row_index]
-            rectangle_row = self.rectangles[row_index]
-            for col_index, cell in enumerate(board_row):
-                current_value = cell.value
-                if previous_row[col_index] != current_value:
-                    self.canvas.itemconfig(rectangle_row[col_index], fill=cell.get_color())
-                    previous_row[col_index] = current_value
-        self.update_stats_display()
+        """Upload the current board as one binary image frame."""
+        frame_parts = [self.frame_header]
+        counts = {cell_type: 0 for cell_type in self.paint_types}
+
+        for board_row in self.board.board:
+            row_parts = []
+            for current_value in board_row:
+                counts[current_value] = counts.get(current_value, 0) + 1
+                row_parts.append(self.render_cell_runs.get(current_value, b'\xff\xff\xff' * self.cell_size))
+
+            image_row = b''.join(row_parts)
+            frame_parts.extend(image_row for _ in range(self.cell_size))
+
+        self.board_image.configure(data=b''.join(frame_parts), format='PPM')
+        self.update_stats_display(counts)
     def toggle_loopback(self):
         """Toggle the canvas loopback setting"""
         self.board.canvas_loopback = self.loopback_var.get()
@@ -763,19 +819,35 @@ class RPSGui:
         self.running = not self.running
         if self.running:
             self.start_button.config(text="Pause")
+            self.next_frame_time = time.perf_counter()
             self.run_simulation()
         else:
             self.start_button.config(text="Start")
+            self.next_frame_time = None
     
     def run_simulation(self):
-        if self.running:
-            self.update_board()
-            delay = int(100 / self.speed_var.get())  # Convert speed to delay in ms
-            self.root.after(delay, self.run_simulation)
+        if not self.running:
+            return
+
+        target_fps = max(1, int(self.fps_var.get()))
+        frame_interval = 1.0 / target_fps
+        if self.next_frame_time is None:
+            self.next_frame_time = time.perf_counter()
+
+        self.update_board()
+
+        self.next_frame_time += frame_interval
+        now = time.perf_counter()
+        if self.next_frame_time < now:
+            self.next_frame_time = now
+
+        delay = max(1, int((self.next_frame_time - now) * 1000))
+        self.root.after(delay, self.run_simulation)
     
     def reset_board(self):
         self.running = False
         self.start_button.config(text="Start")
+        self.next_frame_time = None
 
         if self.loaded_map_data is not None:
             self.apply_map_data(self.loaded_map_data)
