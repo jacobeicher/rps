@@ -1,6 +1,6 @@
 # RPS Cellular Automaton
 
-This project is a Tkinter-based cellular automaton with a custom seven-element ruleset, a live simulation viewer, and a map editor for building starting boards.
+This project is a Pygame-based cellular automaton with a custom seven-element ruleset, a live simulation viewer, and a map editor for building starting boards.
 
 ## Files
 
@@ -81,7 +81,9 @@ The editor supports:
 - clearing or filling the entire board
 - saving simulation defaults with the map
 - loading and editing existing JSON maps
-- scrollable editing for large boards
+- scrollable editing for large boards with the mouse wheel, arrow keys, or right-drag panning
+
+The Pygame editor uses the editable `Map path` field instead of native file dialogs. Enter a JSON path, then click `Load` or `Save`.
 
 Saved map settings include:
 
@@ -118,6 +120,4 @@ Saved maps are JSON files with this structure:
 ## Requirements
 
 - Python 3
-- Tkinter
-
-No third-party packages are required.
+- Pygame

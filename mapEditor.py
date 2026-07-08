@@ -1,556 +1,707 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
 import json
 import os
+import sys
+import time
+
+try:
+    import pygame
+except ModuleNotFoundError:
+    print(
+        "pygame is required to run mapEditor.py. Install it with: python3 -m pip install pygame",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+
+DEFAULT_WIDTH = 228
+DEFAULT_HEIGHT = 125
+DEFAULT_CELL_SIZE = 5
+MIN_MAP_SIZE = 10
+MAX_MAP_SIZE = 1000
+
+TYPES = ['F', 'N', 'M', 'W', 'A', 'E', 'L', '0', 'X']
+LABELS = {
+    'F': 'Fire',
+    'N': 'Nature',
+    'M': 'Metal',
+    'W': 'Water',
+    'A': 'Air',
+    'E': 'Earth',
+    'L': 'Lightning',
+    '0': 'Blank',
+    'X': 'Obstacle',
+}
+HEX_COLORS = {
+    'F': '#FF4500',
+    'N': '#32CD32',
+    'M': '#C0C0C0',
+    'W': '#1E90FF',
+    'A': '#B084F5',
+    'E': '#8B4513',
+    'L': '#FFD700',
+    '0': '#FFFFFF',
+    'X': '#2B2B2B',
+}
+
+
+def hex_to_rgb(color):
+    color = color.lstrip('#')
+    return tuple(int(color[index:index + 2], 16) for index in range(0, 6, 2))
+
+
+COLORS = {cell_type: hex_to_rgb(color) for cell_type, color in HEX_COLORS.items()}
+PALETTE = {
+    'background': (232, 235, 238),
+    'panel': (246, 247, 248),
+    'button': (255, 255, 255),
+    'selected': (221, 235, 249),
+    'input': (255, 255, 255),
+    'text': (30, 34, 39),
+    'muted': (91, 98, 106),
+    'border': (180, 187, 194),
+    'accent': (43, 110, 176),
+}
+
+
+class Button:
+    def __init__(self, rect, text, action, font, selected=False):
+        self.rect = pygame.Rect(rect)
+        self.text = text
+        self.action = action
+        self.font = font
+        self.selected = selected
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.rect.collidepoint(event.pos):
+                self.action()
+                return True
+        return False
+
+    def draw(self, surface):
+        bg = PALETTE['selected'] if self.selected else PALETTE['button']
+        border = PALETTE['accent'] if self.selected else PALETTE['border']
+        pygame.draw.rect(surface, bg, self.rect, border_radius=5)
+        pygame.draw.rect(surface, border, self.rect, 1, border_radius=5)
+        text = self.font.render(self.text, True, PALETTE['text'])
+        surface.blit(text, text.get_rect(center=self.rect.center))
+
+
+class Toggle(Button):
+    def __init__(self, rect, text, getter, setter, font):
+        super().__init__(rect, text, self.toggle, font)
+        self.getter = getter
+        self.setter = setter
+
+    def toggle(self):
+        self.setter(not self.getter())
+
+    def draw(self, surface):
+        self.selected = self.getter()
+        super().draw(surface)
+
+
+class Slider:
+    def __init__(self, rect, label, min_value, max_value, getter, setter, font):
+        self.rect = pygame.Rect(rect)
+        self.label = label
+        self.min_value = min_value
+        self.max_value = max_value
+        self.getter = getter
+        self.setter = setter
+        self.font = font
+        self.dragging = False
+
+    def value_from_pos(self, x):
+        ratio = (x - self.rect.left) / self.rect.width
+        ratio = max(0.0, min(1.0, ratio))
+        return self.min_value + ratio * (self.max_value - self.min_value)
+
+    def knob_rect(self):
+        value = self.getter()
+        ratio = (value - self.min_value) / (self.max_value - self.min_value)
+        x = self.rect.left + int(ratio * self.rect.width)
+        return pygame.Rect(x - 6, self.rect.centery - 9, 12, 18)
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            hit_rect = self.rect.inflate(10, 22)
+            if self.knob_rect().collidepoint(event.pos) or hit_rect.collidepoint(event.pos):
+                self.dragging = True
+                self.setter(self.value_from_pos(event.pos[0]))
+                return True
+        elif event.type == pygame.MOUSEMOTION and self.dragging:
+            self.setter(self.value_from_pos(event.pos[0]))
+            return True
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.dragging:
+            self.dragging = False
+            return True
+        return False
+
+    def draw(self, surface):
+        label = self.font.render(f"{self.label}: {self.getter()}", True, PALETTE['text'])
+        surface.blit(label, (self.rect.left, self.rect.top - 19))
+        pygame.draw.line(
+            surface,
+            PALETTE['border'],
+            (self.rect.left, self.rect.centery),
+            (self.rect.right, self.rect.centery),
+            3,
+        )
+        pygame.draw.rect(surface, PALETTE['accent'], self.knob_rect(), border_radius=4)
+
+
+class TextBox:
+    def __init__(self, rect, label, text, on_commit, font):
+        self.rect = pygame.Rect(rect)
+        self.label = label
+        self.text = str(text)
+        self.on_commit = on_commit
+        self.font = font
+        self.active = False
+
+    def commit(self):
+        self.text = self.on_commit(self.text)
+
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            was_active = self.active
+            self.active = self.rect.collidepoint(event.pos)
+            if was_active and not self.active:
+                self.commit()
+            return self.active
+
+        if event.type != pygame.KEYDOWN or not self.active:
+            return False
+
+        if event.key == pygame.K_RETURN:
+            self.commit()
+            self.active = False
+        elif event.key == pygame.K_ESCAPE:
+            self.active = False
+        elif event.key == pygame.K_BACKSPACE:
+            self.text = self.text[:-1]
+        elif event.unicode and event.unicode in "0123456789./_\\-:abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ ":
+            self.text += event.unicode
+        return True
+
+    def draw(self, surface):
+        label = self.font.render(self.label, True, PALETTE['muted'])
+        surface.blit(label, (self.rect.left, self.rect.top - 17))
+        pygame.draw.rect(surface, PALETTE['input'], self.rect, border_radius=4)
+        pygame.draw.rect(
+            surface,
+            PALETTE['accent'] if self.active else PALETTE['border'],
+            self.rect,
+            1,
+            border_radius=4,
+        )
+        text = self.font.render(self.text, True, PALETTE['text'])
+        clip = surface.get_clip()
+        surface.set_clip(self.rect.inflate(-8, 0))
+        surface.blit(text, (self.rect.left + 6, self.rect.centery - text.get_height() // 2))
+        surface.set_clip(clip)
+
 
 class MapEditor:
-    def __init__(self, root, width=228, height=125, cell_size=5):
-        self.root = root
-        self.root.title("RPS Map Editor")
-        
+    def __init__(self, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, cell_size=DEFAULT_CELL_SIZE):
+        pygame.init()
+        pygame.display.set_caption("RPS Map Editor - Pygame")
+
         self.width = width
         self.height = height
         self.cell_size = cell_size
-        
-        # Initialize board with blank cells
         self.board = [['0' for _ in range(width)] for _ in range(height)]
-        
-        # Current selected type
-        self.current_type = tk.StringVar(value='F')
-        
-        # Pen size
-        self.pen_size = tk.IntVar(value=1)
-        
-        # Drawing state
+
+        self.current_type = 'F'
+        self.pen_size = 1
+        self.mode = "random"
+        self.mutation_percent = 0.0
+        self.protection_factor = 0.5
+        self.loopback = True
+        self.copy_board = False
+        self.map_path_text = os.path.join("maps", "gameBoard.json")
+
+        self.scroll_x = 0
+        self.scroll_y = 0
         self.is_drawing = False
+        self.is_panning = False
+        self.last_pan_pos = None
+        self.status_message = "Ready"
+        self.status_until = 0.0
 
-        # Simulation defaults saved with the map and applied by the RPS client.
-        self.mode_var = tk.StringVar(value="random")
-        self.mutation_var = tk.StringVar(value="0.01")
-        self.protection_var = tk.StringVar(value="0.50")
-        self.loopback_var = tk.BooleanVar(value=True)
-        self.copy_board_var = tk.BooleanVar(value=False)
-        
-        # Define types and colors matching the main game
-        self.types = ['F', 'N', 'M', 'W', 'A', 'E', 'L', '0', 'X']
-        self.colors = {
-            'F': '#FF4500',  # Fire - Orange Red
-            'N': '#32CD32',  # Nature - Lime Green
-            'M': '#C0C0C0',  # Metal - Silver
-            'W': '#1E90FF',  # Water - Dodger Blue
-            'A': '#B084F5',  # Air - Purple
-            'E': '#8B4513',  # Earth - Saddle Brown
-            'L': '#FFD700',  # Lightning - Gold
-            '0': '#FFFFFF',  # Empty / Neutral
-            'X': '#2B2B2B',  # Obstacle / Wall
-        }
-        self.labels = {
-            'F': 'Fire',
-            'N': 'Nature',
-            'M': 'Metal',
-            'W': 'Water',
-            'A': 'Air',
-            'E': 'Earth',
-            'L': 'Lightning',
-            '0': 'Blank',
-            'X': 'Obstacle',
-        }
-        
-        self.setup_ui()
-    
-    def setup_ui(self):
-        # Create main container
-        main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Create toolbar
-        toolbar = ttk.Frame(main_frame)
-        toolbar.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
-        
-        # File operations
-        ttk.Button(toolbar, text="New", command=self.new_map).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="Load", command=self.load_map).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="Save", command=self.save_map).pack(side=tk.LEFT, padx=2)
-        
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
-        
-        # Map size button
-        ttk.Button(toolbar, text="Resize Map", command=self.resize_map).pack(side=tk.LEFT, padx=2)
-        
-        # Display current size
-        self.size_label = ttk.Label(toolbar, text=f"Size: {self.width}x{self.height}")
-        self.size_label.pack(side=tk.LEFT, padx=5)
-        
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
-        
-        # Clear and fill operations
-        ttk.Button(toolbar, text="Clear All", command=self.clear_all).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="Fill All", command=self.fill_all).pack(side=tk.LEFT, padx=2)
-        
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
-        
-        # Pen size control
-        ttk.Label(toolbar, text="Pen Size:").pack(side=tk.LEFT, padx=5)
-        self.pen_size_label = ttk.Label(toolbar, text="1", width=3)
-        self.pen_size_label.pack(side=tk.LEFT)
-        pen_size_slider = ttk.Scale(
-            toolbar,
-            from_=1,
-            to=25,
-            orient=tk.HORIZONTAL,
-            variable=self.pen_size,
-            command=self.update_pen_size_label,
-            length=150
+        self.screen = pygame.display.set_mode((1220, 820), pygame.RESIZABLE)
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.SysFont("Arial", 14)
+        self.small_font = pygame.font.SysFont("Arial", 12)
+        self.controls = []
+        self.brush_buttons = []
+        self.board_rect = pygame.Rect(0, 0, 1, 1)
+        self.width_box = None
+        self.height_box = None
+        self.mutation_box = None
+        self.protection_box = None
+        self.path_box = None
+        self.build_layout()
+
+    def build_layout(self):
+        screen_rect = self.screen.get_rect()
+        top_height = 118
+        side_width = 180
+        margin = 12
+        status_height = 24
+        self.board_rect = pygame.Rect(
+            margin,
+            top_height,
+            max(120, screen_rect.width - side_width - margin * 3),
+            max(120, screen_rect.height - top_height - margin * 2 - status_height),
         )
-        pen_size_slider.pack(side=tk.LEFT, padx=5)
-        
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
-        
-        # Type selector
-        ttk.Label(toolbar, text="Brush:").pack(side=tk.LEFT, padx=5)
 
-        # Simulation defaults
-        settings_bar = ttk.Frame(main_frame)
-        settings_bar.pack(side=tk.TOP, fill=tk.X, padx=5, pady=(0, 5))
+        self.controls = []
+        self.brush_buttons = []
 
-        ttk.Label(settings_bar, text="Mode:").pack(side=tk.LEFT, padx=5)
-        mode_combo = ttk.Combobox(settings_bar, textvariable=self.mode_var, values=["fixed", "random"], state="readonly", width=10)
-        mode_combo.pack(side=tk.LEFT, padx=5)
+        x = margin
+        y = 20
 
-        ttk.Label(settings_bar, text="Mutation %:").pack(side=tk.LEFT, padx=5)
-        mutation_entry = ttk.Entry(settings_bar, textvariable=self.mutation_var, width=8)
-        mutation_entry.pack(side=tk.LEFT, padx=5)
-        mutation_entry.bind('<Return>', self.update_mutation_rate)
-        mutation_entry.bind('<FocusOut>', self.update_mutation_rate)
+        def add_button(label, width, action):
+            nonlocal x
+            button = Button((x, y, width, 28), label, action, self.font)
+            self.controls.append(button)
+            x += width + 6
+            return button
 
-        ttk.Label(settings_bar, text="Protection:").pack(side=tk.LEFT, padx=5)
-        protection_entry = ttk.Entry(settings_bar, textvariable=self.protection_var, width=6)
-        protection_entry.pack(side=tk.LEFT, padx=5)
-        protection_entry.bind('<Return>', self.update_protection_factor)
-        protection_entry.bind('<FocusOut>', self.update_protection_factor)
+        add_button("New", 54, self.new_map)
+        add_button("Clear", 58, self.clear_all)
+        add_button("Fill", 48, self.fill_all)
+        add_button("Load", 54, self.load_map_from_box)
+        add_button("Save", 54, self.save_map_from_box)
+        add_button("Resize", 66, self.resize_from_boxes)
+        add_button("Center", 62, self.center_view)
 
-        loopback_check = ttk.Checkbutton(settings_bar, text="Wrap Edges", variable=self.loopback_var)
-        loopback_check.pack(side=tk.LEFT, padx=5)
+        self.width_box = TextBox((x + 8, y, 58, 28), "Width", self.width, self.commit_width, self.small_font)
+        self.height_box = TextBox((x + 78, y, 58, 28), "Height", self.height, self.commit_height, self.small_font)
+        self.controls.extend([self.width_box, self.height_box])
 
-        copy_board_check = ttk.Checkbutton(settings_bar, text="Copy Board", variable=self.copy_board_var)
-        copy_board_check.pack(side=tk.LEFT, padx=5)
-        
-        # Create canvas frame with scrollbars
-        canvas_frame = ttk.Frame(main_frame)
-        canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Create scrollbars
-        v_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL)
-        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        h_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL)
-        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
-        
-        # Create canvas
-        canvas_width = self.width * self.cell_size
-        canvas_height = self.height * self.cell_size
-        self.canvas = tk.Canvas(
-            canvas_frame,
-            width=min(canvas_width, 1200),
-            height=min(canvas_height, 600),
-            bg='white',
-            scrollregion=(0, 0, canvas_width, canvas_height),
-            xscrollcommand=h_scrollbar.set,
-            yscrollcommand=v_scrollbar.set
+        path_width = max(180, screen_rect.width - x - 222)
+        self.path_box = TextBox(
+            (x + 150, y, path_width, 28),
+            "Map path",
+            self.map_path_text,
+            lambda text: text.strip() or os.path.join("maps", "gameBoard.json"),
+            self.small_font,
         )
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        v_scrollbar.config(command=self.canvas.yview)
-        h_scrollbar.config(command=self.canvas.xview)
-        
-        # Bind mouse events
-        self.canvas.bind('<Button-1>', self.start_draw)
-        self.canvas.bind('<B1-Motion>', self.draw)
-        self.canvas.bind('<ButtonRelease-1>', self.stop_draw)
-        
-        # Create palette panel
-        palette_frame = ttk.Frame(main_frame)
-        palette_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
-        
-        ttk.Label(palette_frame, text="Palette", font=('Arial', 12, 'bold')).pack(pady=5)
-        
-        # Create palette buttons
-        for cell_type in self.types:
-            self.create_palette_button(palette_frame, cell_type)
-        
-        # Create rectangles for each cell
-        self.rectangles = []
-        for row in range(self.height):
-            row_rects = []
-            for col in range(self.width):
-                x1 = col * self.cell_size
-                y1 = row * self.cell_size
-                x2 = x1 + self.cell_size
-                y2 = y1 + self.cell_size
-                rect = self.canvas.create_rectangle(x1, y1, x2, y2, fill='white', outline='gray')
-                row_rects.append(rect)
-            self.rectangles.append(row_rects)
-        
-        self.draw_board()
-    
-    def resize_map(self):
-        """Open dialog to resize the map"""
-        dialog = ResizeDialog(self.root, self.width, self.height)
-        self.root.wait_window(dialog.top)
-        
-        if dialog.result:
-            new_width, new_height = dialog.result
-            
-            if new_width == self.width and new_height == self.height:
-                return
-            
-            # Create new board with new dimensions
-            new_board = [['0' for _ in range(new_width)] for _ in range(new_height)]
-            
-            # Copy existing data (as much as fits)
-            for row in range(min(self.height, new_height)):
-                for col in range(min(self.width, new_width)):
-                    new_board[row][col] = self.board[row][col]
-            
-            # Update dimensions and board
-            self.width = new_width
-            self.height = new_height
-            self.board = new_board
-            
-            # Update size label
-            self.size_label.config(text=f"Size: {self.width}x{self.height}")
-            
-            # Recreate canvas
-            self.recreate_canvas()
-            self.draw_board()
-    
-    def update_pen_size_label(self, value):
-        """Update the pen size label when slider changes"""
-        self.pen_size_label.config(text=str(int(float(value))))
+        self.controls.append(self.path_box)
 
-    def update_mutation_rate(self, event=None):
-        """Validate the saved mutation default as a percentage."""
-        try:
-            rate = float(self.mutation_var.get())
-            rate = max(0.0, min(100.0, rate))
-            self.mutation_var.set(f"{rate:.2f}")
-        except ValueError:
-            self.mutation_var.set("0.00")
+        x = margin
+        y = 76
+        self.controls.append(Button((x, y, 112, 28), "Mode: random", self.toggle_mode, self.font))
+        x += 118
+        self.controls.append(Toggle((x, y, 102, 28), "Wrap Edges", lambda: self.loopback, self.set_loopback, self.font))
+        x += 108
+        self.controls.append(Toggle((x, y, 96, 28), "Copy Board", lambda: self.copy_board, self.set_copy_board, self.font))
+        x += 110
 
-    def update_protection_factor(self, event=None):
-        """Validate the saved protection default."""
+        self.mutation_box = TextBox(
+            (x, y, 72, 28),
+            "Mutation %",
+            f"{self.mutation_percent:.2f}",
+            self.commit_mutation,
+            self.small_font,
+        )
+        self.protection_box = TextBox(
+            (x + 86, y, 66, 28),
+            "Protection",
+            f"{self.protection_factor:.2f}",
+            self.commit_protection,
+            self.small_font,
+        )
+        self.controls.extend([self.mutation_box, self.protection_box])
+        x += 172
+        self.controls.append(Slider((x, y + 7, 150, 18), "Pen", 1, 25, lambda: self.pen_size, self.set_pen_size, self.small_font))
+
+        palette_x = self.board_rect.right + margin
+        palette_y = top_height
+        for index, cell_type in enumerate(TYPES):
+            button = Button(
+                (palette_x, palette_y + index * 42 + 28, side_width, 32),
+                LABELS[cell_type],
+                lambda selected=cell_type: self.select_brush(selected),
+                self.font,
+            )
+            self.brush_buttons.append((button, cell_type))
+            self.controls.append(button)
+
+        self.clamp_scroll()
+
+    def set_status(self, message, seconds=4.0):
+        self.status_message = message
+        self.status_until = time.perf_counter() + seconds
+        print(message)
+
+    def set_pen_size(self, value):
+        self.pen_size = max(1, min(25, int(round(value))))
+
+    def set_loopback(self, value):
+        self.loopback = bool(value)
+
+    def set_copy_board(self, value):
+        self.copy_board = bool(value)
+
+    def select_brush(self, cell_type):
+        self.current_type = cell_type
+
+    def toggle_mode(self):
+        self.mode = "fixed" if self.mode == "random" else "random"
+
+    def commit_width(self, text):
+        return str(self.parse_size(text, self.width))
+
+    def commit_height(self, text):
+        return str(self.parse_size(text, self.height))
+
+    def commit_mutation(self, text):
         try:
-            factor = float(self.protection_var.get())
-            factor = max(0.0, factor)
-            self.protection_var.set(f"{factor:.2f}")
+            value = float(text)
         except ValueError:
-            self.protection_var.set("0.50")
+            value = self.mutation_percent
+        self.mutation_percent = max(0.0, min(100.0, value))
+        return f"{self.mutation_percent:.2f}"
+
+    def commit_protection(self, text):
+        try:
+            value = float(text)
+        except ValueError:
+            value = self.protection_factor
+        self.protection_factor = max(0.0, value)
+        return f"{self.protection_factor:.2f}"
+
+    def parse_size(self, text, fallback):
+        try:
+            value = int(text)
+        except ValueError:
+            value = fallback
+        return max(MIN_MAP_SIZE, min(MAX_MAP_SIZE, value))
 
     def get_settings(self):
-        """Return simulation defaults in the same units the RPS client uses."""
-        self.update_mutation_rate()
-        self.update_protection_factor()
+        self.mutation_box.commit()
+        self.protection_box.commit()
         return {
-            'combat_mode': self.mode_var.get(),
-            'mutation_rate': float(self.mutation_var.get()) / 100.0,
-            'protection_factor': float(self.protection_var.get()),
-            'canvas_loopback': self.loopback_var.get(),
-            'copy_board': self.copy_board_var.get()
+            'combat_mode': self.mode,
+            'mutation_rate': self.mutation_percent / 100.0,
+            'protection_factor': self.protection_factor,
+            'canvas_loopback': self.loopback,
+            'copy_board': self.copy_board,
         }
 
     def apply_settings(self, settings):
-        """Apply optional simulation defaults from a loaded map."""
         if not isinstance(settings, dict):
             return
 
         mode = settings.get('combat_mode')
         if mode in ("fixed", "random"):
-            self.mode_var.set(mode)
+            self.mode = mode
 
-        if 'mutation_rate' in settings:
-            try:
-                mutation_percent = max(0.0, min(100.0, float(settings['mutation_rate']) * 100.0))
-                self.mutation_var.set(f"{mutation_percent:.2f}")
-            except (TypeError, ValueError):
-                pass
+        try:
+            self.mutation_percent = max(0.0, min(100.0, float(settings.get('mutation_rate', self.mutation_percent / 100.0)) * 100.0))
+        except (TypeError, ValueError):
+            pass
 
-        if 'protection_factor' in settings:
-            try:
-                protection_factor = max(0.0, float(settings['protection_factor']))
-                self.protection_var.set(f"{protection_factor:.2f}")
-            except (TypeError, ValueError):
-                pass
+        try:
+            self.protection_factor = max(0.0, float(settings.get('protection_factor', self.protection_factor)))
+        except (TypeError, ValueError):
+            pass
 
         if 'canvas_loopback' in settings:
-            self.loopback_var.set(bool(settings['canvas_loopback']))
-
+            self.loopback = bool(settings['canvas_loopback'])
         if 'copy_board' in settings:
-            self.copy_board_var.set(bool(settings['copy_board']))
-    
-    def create_palette_button(self, parent, cell_type):
-        """Create a palette button for a cell type"""
-        frame = ttk.Frame(parent)
-        frame.pack(fill=tk.X, pady=2)
-        
-        # Color preview
-        color_canvas = tk.Canvas(frame, width=30, height=30, bg='white', highlightthickness=1, highlightbackground='gray')
-        color_canvas.create_rectangle(2, 2, 28, 28, fill=self.colors[cell_type], outline='gray')
-        color_canvas.pack(side=tk.LEFT, padx=5)
-        
-        # Button
-        btn = ttk.Radiobutton(
-            frame,
-            text=self.labels[cell_type],
-            variable=self.current_type,
-            value=cell_type,
-            width=12
-        )
-        btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
-    
-    def get_cell_coords(self, event):
-        """Convert canvas coordinates to cell coordinates"""
-        canvas_x = self.canvas.canvasx(event.x)
-        canvas_y = self.canvas.canvasy(event.y)
-        col = int(canvas_x // self.cell_size)
-        row = int(canvas_y // self.cell_size)
-        
+            self.copy_board = bool(settings['copy_board'])
+
+        self.mutation_box.text = f"{self.mutation_percent:.2f}"
+        self.protection_box.text = f"{self.protection_factor:.2f}"
+
+    def new_map(self):
+        self.board = [['0' for _ in range(self.width)] for _ in range(self.height)]
+        self.set_status("Created a blank map.")
+
+    def clear_all(self):
+        self.board = [['0' for _ in range(self.width)] for _ in range(self.height)]
+        self.set_status("Cleared all cells.")
+
+    def fill_all(self):
+        self.board = [[self.current_type for _ in range(self.width)] for _ in range(self.height)]
+        self.set_status(f"Filled map with {LABELS[self.current_type]}.")
+
+    def resize_from_boxes(self):
+        self.width_box.commit()
+        self.height_box.commit()
+        new_width = self.parse_size(self.width_box.text, self.width)
+        new_height = self.parse_size(self.height_box.text, self.height)
+        self.resize_map(new_width, new_height)
+
+    def resize_map(self, new_width, new_height):
+        if new_width == self.width and new_height == self.height:
+            self.set_status("Map size unchanged.", seconds=2.0)
+            return
+
+        new_board = [['0' for _ in range(new_width)] for _ in range(new_height)]
+        for row in range(min(self.height, new_height)):
+            for col in range(min(self.width, new_width)):
+                new_board[row][col] = self.board[row][col]
+
+        self.width = new_width
+        self.height = new_height
+        self.board = new_board
+        self.width_box.text = str(self.width)
+        self.height_box.text = str(self.height)
+        self.clamp_scroll()
+        self.set_status(f"Resized map to {self.width}x{self.height}.")
+
+    def map_path(self):
+        self.path_box.commit()
+        self.map_path_text = self.path_box.text.strip()
+        if os.path.isabs(self.map_path_text):
+            return self.map_path_text
+        return os.path.join(os.getcwd(), self.map_path_text)
+
+    def save_map_from_box(self):
+        filename = self.map_path()
+        try:
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+            map_data = {
+                'width': self.width,
+                'height': self.height,
+                'settings': self.get_settings(),
+                'board': self.board,
+            }
+            with open(filename, 'w') as file:
+                json.dump(map_data, file, indent=2)
+            self.set_status(f"Saved map: {os.path.relpath(filename, os.getcwd())}")
+        except Exception as exc:
+            self.set_status(f"Failed to save map: {exc}")
+
+    def load_map_from_box(self):
+        filename = self.map_path()
+        try:
+            with open(filename, 'r') as file:
+                map_data = json.load(file)
+            if 'board' not in map_data or 'width' not in map_data or 'height' not in map_data:
+                raise ValueError("Invalid map file format")
+
+            self.width = self.parse_size(str(map_data['width']), self.width)
+            self.height = self.parse_size(str(map_data['height']), self.height)
+            self.board = self.normalize_board(map_data['board'], self.width, self.height)
+            self.width_box.text = str(self.width)
+            self.height_box.text = str(self.height)
+            self.apply_settings(map_data.get('settings'))
+            self.clamp_scroll()
+            self.set_status(f"Loaded map: {os.path.relpath(filename, os.getcwd())}")
+        except Exception as exc:
+            self.set_status(f"Failed to load map: {exc}")
+
+    def normalize_board(self, board_values, width, height):
+        normalized = [['0' for _ in range(width)] for _ in range(height)]
+        for row_index, row in enumerate(board_values[:height]):
+            if not isinstance(row, list):
+                continue
+            for col_index, value in enumerate(row[:width]):
+                normalized[row_index][col_index] = value if value in TYPES else '0'
+        return normalized
+
+    def center_view(self):
+        board_pixel_width = self.width * self.cell_size
+        board_pixel_height = self.height * self.cell_size
+        self.scroll_x = max(0, (board_pixel_width - self.board_rect.width) // 2)
+        self.scroll_y = max(0, (board_pixel_height - self.board_rect.height) // 2)
+        self.clamp_scroll()
+
+    def clamp_scroll(self):
+        max_x = max(0, self.width * self.cell_size - self.board_rect.width)
+        max_y = max(0, self.height * self.cell_size - self.board_rect.height)
+        self.scroll_x = max(0, min(max_x, self.scroll_x))
+        self.scroll_y = max(0, min(max_y, self.scroll_y))
+
+    def get_cell_coords(self, pos):
+        if not self.board_rect.collidepoint(pos):
+            return None, None
+        board_x = pos[0] - self.board_rect.left + self.scroll_x
+        board_y = pos[1] - self.board_rect.top + self.scroll_y
+        col = int(board_x // self.cell_size)
+        row = int(board_y // self.cell_size)
         if 0 <= row < self.height and 0 <= col < self.width:
             return row, col
         return None, None
-    
-    def start_draw(self, event):
-        """Start drawing"""
-        self.is_drawing = True
-        self.draw(event)
-    
-    def draw(self, event):
-        """Draw on the canvas with pen size"""
-        if not self.is_drawing:
+
+    def paint_at(self, pos):
+        row, col = self.get_cell_coords(pos)
+        if row is None or col is None:
             return
-        
-        row, col = self.get_cell_coords(event)
-        if row is not None and col is not None:
-            pen_size = self.pen_size.get()
-            current_type = self.current_type.get()
-            
-            # Calculate the range of cells to paint based on pen size
-            radius = pen_size // 2
-            
-            for dr in range(-radius, radius + 1):
-                for dc in range(-radius, radius + 1):
-                    new_row = row + dr
-                    new_col = col + dc
-                    
-                    # Check if within bounds
-                    if 0 <= new_row < self.height and 0 <= new_col < self.width:
-                        self.board[new_row][new_col] = current_type
-                        self.canvas.itemconfig(
-                            self.rectangles[new_row][new_col],
-                            fill=self.colors[current_type]
-                        )
-    
-    def stop_draw(self, event):
-        """Stop drawing"""
-        self.is_drawing = False
-    
+
+        radius = self.pen_size // 2
+        for dr in range(-radius, radius + 1):
+            for dc in range(-radius, radius + 1):
+                next_row = row + dr
+                next_col = col + dc
+                if 0 <= next_row < self.height and 0 <= next_col < self.width:
+                    self.board[next_row][next_col] = self.current_type
+
+    def pan_by(self, dx, dy):
+        self.scroll_x += dx
+        self.scroll_y += dy
+        self.clamp_scroll()
+
+    def active_textbox(self):
+        return any(isinstance(control, TextBox) and control.active for control in self.controls)
+
+    def handle_keydown(self, event):
+        if self.active_textbox():
+            return
+        if event.key == pygame.K_ESCAPE:
+            pygame.event.post(pygame.event.Event(pygame.QUIT))
+        elif event.key == pygame.K_s:
+            self.save_map_from_box()
+        elif event.key == pygame.K_l:
+            self.load_map_from_box()
+        elif event.key == pygame.K_m:
+            self.toggle_mode()
+        elif event.key == pygame.K_w:
+            self.set_loopback(not self.loopback)
+        elif event.key == pygame.K_c:
+            self.set_copy_board(not self.copy_board)
+        elif event.key in (pygame.K_EQUALS, pygame.K_PLUS):
+            self.set_pen_size(self.pen_size + 1)
+        elif event.key == pygame.K_MINUS:
+            self.set_pen_size(self.pen_size - 1)
+        elif event.key == pygame.K_LEFT:
+            self.pan_by(-40, 0)
+        elif event.key == pygame.K_RIGHT:
+            self.pan_by(40, 0)
+        elif event.key == pygame.K_UP:
+            self.pan_by(0, -40)
+        elif event.key == pygame.K_DOWN:
+            self.pan_by(0, 40)
+        elif pygame.K_1 <= event.key <= pygame.K_9:
+            index = event.key - pygame.K_1
+            if index < len(TYPES):
+                self.select_brush(TYPES[index])
+
+    def handle_event(self, event):
+        for control in self.controls:
+            if control.handle_event(event):
+                return
+
+        if event.type == pygame.VIDEORESIZE:
+            self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
+            self.build_layout()
+        elif event.type == pygame.KEYDOWN:
+            self.handle_keydown(event)
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1 and self.board_rect.collidepoint(event.pos):
+                self.is_drawing = True
+                self.paint_at(event.pos)
+            elif event.button in (2, 3) and self.board_rect.collidepoint(event.pos):
+                self.is_panning = True
+                self.last_pan_pos = event.pos
+            elif event.button == 4:
+                if pygame.key.get_mods() & pygame.KMOD_SHIFT:
+                    self.pan_by(-80, 0)
+                else:
+                    self.pan_by(0, -80)
+            elif event.button == 5:
+                if pygame.key.get_mods() & pygame.KMOD_SHIFT:
+                    self.pan_by(80, 0)
+                else:
+                    self.pan_by(0, 80)
+        elif event.type == pygame.MOUSEMOTION:
+            if self.is_drawing:
+                self.paint_at(event.pos)
+            elif self.is_panning and self.last_pan_pos:
+                dx = self.last_pan_pos[0] - event.pos[0]
+                dy = self.last_pan_pos[1] - event.pos[1]
+                self.pan_by(dx, dy)
+                self.last_pan_pos = event.pos
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1:
+                self.is_drawing = False
+            elif event.button in (2, 3):
+                self.is_panning = False
+                self.last_pan_pos = None
+
     def draw_board(self):
-        """Redraw the entire board"""
-        for row in range(self.height):
-            for col in range(self.width):
-                color = self.colors[self.board[row][col]]
-                self.canvas.itemconfig(self.rectangles[row][col], fill=color)
-    
-    def new_map(self):
-        """Create a new blank map"""
-        if messagebox.askyesno("New Map", "Create a new blank map? This will clear the current map."):
-            self.board = [['0' for _ in range(self.width)] for _ in range(self.height)]
-            self.draw_board()
-    
-    def clear_all(self):
-        """Clear all cells to blank"""
-        if messagebox.askyesno("Clear All", "Clear all cells to blank?"):
-            self.board = [['0' for _ in range(self.width)] for _ in range(self.height)]
-            self.draw_board()
-    
-    def fill_all(self):
-        """Fill all cells with current type"""
-        current = self.current_type.get()
-        if messagebox.askyesno("Fill All", f"Fill all cells with {self.labels[current]}?"):
-            self.board = [[current for _ in range(self.width)] for _ in range(self.height)]
-            self.draw_board()
-    
-    def save_map(self):
-        """Save the current map to a JSON file"""
-        filename = filedialog.asksaveasfilename(
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            title="Save Map",
-            initialdir=os.getcwd() + "/maps"
-        )
-        
-        if filename:
-            try:
-                map_data = {
-                    'width': self.width,
-                    'height': self.height,
-                    'settings': self.get_settings(),
-                    'board': self.board
-                }
-                
-                with open(filename, 'w') as f:
-                    json.dump(map_data, f, indent=2)
-                
-                messagebox.showinfo("Success", f"Map saved to {filename}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to save map: {str(e)}")
-    
-    def load_map(self):
-        """Load a map from a JSON file"""
-        filename = filedialog.askopenfilename(
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            title="Load Map",
-            initialdir=os.getcwd() + "/maps"
-        )
-        
-        if filename:
-            try:
-                with open(filename, 'r') as f:
-                    map_data = json.load(f)
-                
-                # Validate map data
-                if 'board' not in map_data or 'width' not in map_data or 'height' not in map_data:
-                    raise ValueError("Invalid map file format")
-                
-                # Check if dimensions match
-                if map_data['width'] != self.width or map_data['height'] != self.height:
-                    if not messagebox.askyesno(
-                        "Dimension Mismatch",
-                        f"Map dimensions ({map_data['width']}x{map_data['height']}) don't match editor dimensions ({self.width}x{self.height}). Load anyway?"
-                    ):
-                        return
-                    
-                    # Resize if needed
-                    self.width = map_data['width']
-                    self.height = map_data['height'] 
-                    self.size_label.config(text=f"Size: {self.width}x{self.height}")
-                    self.recreate_canvas()
-                
-                self.board = map_data['board']
-                self.apply_settings(map_data.get('settings'))
-                self.draw_board()
-                messagebox.showinfo("Success", f"Map loaded from {filename}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to load map: {str(e)}")
-    
-    def recreate_canvas(self):
-        """Recreate the canvas with new dimensions"""
-        # Clear existing rectangles
-        self.canvas.delete("all")
-        
-        # Update canvas scroll region
-        canvas_width = self.width * self.cell_size
-        canvas_height = self.height * self.cell_size
-        self.canvas.config(scrollregion=(0, 0, canvas_width, canvas_height))
-        
-        # Create new rectangles
-        self.rectangles = []
-        for row in range(self.height):
-            row_rects = []
-            for col in range(self.width):
-                x1 = col * self.cell_size
-                y1 = row * self.cell_size
-                x2 = x1 + self.cell_size
-                y2 = y1 + self.cell_size
-                rect = self.canvas.create_rectangle(x1, y1, x2, y2, fill='white', outline='gray')
-                row_rects.append(rect)
-            self.rectangles.append(row_rects)
+        pygame.draw.rect(self.screen, (255, 255, 255), self.board_rect)
+        pygame.draw.rect(self.screen, PALETTE['border'], self.board_rect, 1)
 
+        start_col = self.scroll_x // self.cell_size
+        start_row = self.scroll_y // self.cell_size
+        end_col = min(self.width, (self.scroll_x + self.board_rect.width) // self.cell_size + 2)
+        end_row = min(self.height, (self.scroll_y + self.board_rect.height) // self.cell_size + 2)
 
-class ResizeDialog:
-    """Dialog for resizing the map"""
-    def __init__(self, parent, current_width, current_height):
-        self.result = None
-        
-        self.top = tk.Toplevel(parent)
-        self.top.title("Resize Map")
-        self.top.transient(parent)
-        self.top.grab_set()
-        
-        # Center the dialog
-        self.top.geometry("300x150")
-        
-        # Width input
-        width_frame = ttk.Frame(self.top)
-        width_frame.pack(pady=10, padx=20, fill=tk.X)
-        
-        ttk.Label(width_frame, text="Width:", width=10).pack(side=tk.LEFT)
-        self.width_var = tk.IntVar(value=current_width)
-        width_spinbox = ttk.Spinbox(
-            width_frame,
-            from_=10,
-            to=1000,
-            textvariable=self.width_var,
-            width=10
-        )
-        width_spinbox.pack(side=tk.LEFT, padx=5)
-        
-        # Height input
-        height_frame = ttk.Frame(self.top)
-        height_frame.pack(pady=10, padx=20, fill=tk.X)
-        
-        ttk.Label(height_frame, text="Height:", width=10).pack(side=tk.LEFT)
-        self.height_var = tk.IntVar(value=current_height)
-        height_spinbox = ttk.Spinbox(
-            height_frame,
-            from_=10,
-            to=1000,
-            textvariable=self.height_var,
-            width=10
-        )
-        height_spinbox.pack(side=tk.LEFT, padx=5)
-        
-        # Buttons
-        button_frame = ttk.Frame(self.top)
-        button_frame.pack(pady=20)
-        
-        ttk.Button(button_frame, text="OK", command=self.ok, width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Cancel", command=self.cancel, width=10).pack(side=tk.LEFT, padx=5)
-        
-        # Bind Enter key to OK
-        self.top.bind('<Return>', lambda e: self.ok())
-        self.top.bind('<Escape>', lambda e: self.cancel())
-        
-        # Focus on width input
-        width_spinbox.focus_set()
-    
-    def ok(self):
-        """Handle OK button"""
-        try:
-            width = self.width_var.get()
-            height = self.height_var.get()
-            
-            if width < 10 or width > 1000:
-                messagebox.showerror("Invalid Input", "Width must be between 10 and 1000")
-                return
-            
-            if height < 10 or height > 1000:
-                messagebox.showerror("Invalid Input", "Height must be between 10 and 1000")
-                return
-            
-            self.result = (width, height)
-            self.top.destroy()
-        except tk.TclError:
-            messagebox.showerror("Invalid Input", "Please enter valid numbers")
-    
-    def cancel(self):
-        """Handle Cancel button"""
-        self.top.destroy()
+        for row in range(start_row, end_row):
+            y = self.board_rect.top + row * self.cell_size - self.scroll_y
+            for col in range(start_col, end_col):
+                x = self.board_rect.left + col * self.cell_size - self.scroll_x
+                rect = pygame.Rect(x, y, self.cell_size, self.cell_size)
+                self.screen.fill(COLORS.get(self.board[row][col], COLORS['0']), rect)
+
+        if self.cell_size >= 8:
+            for col in range(start_col, end_col + 1):
+                x = self.board_rect.left + col * self.cell_size - self.scroll_x
+                pygame.draw.line(self.screen, (216, 220, 224), (x, self.board_rect.top), (x, self.board_rect.bottom))
+            for row in range(start_row, end_row + 1):
+                y = self.board_rect.top + row * self.cell_size - self.scroll_y
+                pygame.draw.line(self.screen, (216, 220, 224), (self.board_rect.left, y), (self.board_rect.right, y))
+
+    def draw_palette(self):
+        title = self.font.render("Palette", True, PALETTE['text'])
+        self.screen.blit(title, (self.board_rect.right + 12, self.board_rect.top))
+        for button, cell_type in self.brush_buttons:
+            button.selected = self.current_type == cell_type
+            old_text = button.text
+            button.text = f"   {old_text}"
+            button.draw(self.screen)
+            button.text = old_text
+            swatch = pygame.Rect(button.rect.left + 8, button.rect.top + 6, 20, 20)
+            pygame.draw.rect(self.screen, COLORS[cell_type], swatch, border_radius=3)
+            pygame.draw.rect(self.screen, PALETTE['border'], swatch, 1, border_radius=3)
+
+    def draw_status(self):
+        if time.perf_counter() > self.status_until:
+            cell_text = f"{self.width}x{self.height} | scroll {self.scroll_x},{self.scroll_y}"
+            message = f"{cell_text} | brush {LABELS[self.current_type]} | drag to paint, wheel to scroll, right-drag to pan"
+        else:
+            message = self.status_message
+        text = self.small_font.render(message, True, PALETTE['muted'])
+        self.screen.blit(text, (self.board_rect.left, self.board_rect.bottom + 7))
+
+    def draw(self):
+        self.screen.fill(PALETTE['background'])
+        pygame.draw.rect(self.screen, PALETTE['panel'], (0, 0, self.screen.get_width(), 112))
+
+        for control in self.controls:
+            if isinstance(control, Button) and control.text.startswith("Mode:"):
+                control.text = f"Mode: {self.mode}"
+            control.draw(self.screen)
+
+        self.draw_board()
+        self.draw_palette()
+        self.draw_status()
+        pygame.display.flip()
+
+    def run(self):
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                else:
+                    self.handle_event(event)
+            self.draw()
+            self.clock.tick(60)
+
+        pygame.quit()
 
 
 def main():
-    root = tk.Tk()
-    editor = MapEditor(root)
-    root.mainloop()
+    MapEditor().run()
 
 
 if __name__ == "__main__":

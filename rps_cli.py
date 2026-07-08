@@ -140,7 +140,7 @@ def update_board(board, combat_mode = "random"):
        
 
 def main():
-    game_board = Board(include_blanks=True )
+    game_board = Board(include_blanks=False )
     display_board(game_board)
     while True:
         update_board(game_board)
