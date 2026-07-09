@@ -21,6 +21,55 @@ NEIGHBOR_OFFSETS = tuple(
 
 STANDARD_RESOLUTION_SCALE = 1
 HD_RESOLUTION_SCALE = 2
+WATER_COLORS = {
+    'F': '#BDEBFF',
+    'N': '#7DD8FF',
+    'M': '#4EB9ED',
+    'W': '#178AD1',
+    'A': '#DFF7FF',
+    'E': '#0D5FA8',
+    'L': '#73C8FF',
+    '0': '#F6FCFF',
+    'X': '#082C4C',
+    'H': '#A5E5FF',
+}
+CLOUD_COLORS = {
+    'F': '#F7FBFF',
+    'N': '#D9E4EC',
+    'M': '#AAB7C2',
+    'W': '#8CC7EA',
+    'A': '#FFFFFF',
+    'E': '#6F7E8B',
+    'L': '#C8D3DD',
+    '0': '#EAF7FF',
+    'X': '#35404A',
+    'H': '#B8E2FA',
+}
+SAND_COLORS = {
+    'F': '#D99D44',
+    'N': '#C9B06B',
+    'M': '#A98F62',
+    'W': '#6FB8C9',
+    'A': '#F4E2B8',
+    'E': '#8A6841',
+    'L': '#F6D37A',
+    '0': '#FFF3D0',
+    'X': '#3F3528',
+    'H': '#E8BE69',
+}
+GRAYSCALE_COLORS = {
+    'F': '#F2F2F2',
+    'N': '#D7D7D7',
+    'M': '#B9B9B9',
+    'W': '#9C9C9C',
+    'A': '#7E7E7E',
+    'E': '#5F5F5F',
+    'L': '#3F3F3F',
+    '0': '#FFFFFF',
+    'X': '#121212',
+    'H': '#C8C8C8',
+}
+VIEW_MODES = ('normal', 'water', 'clouds', 'sand', 'grayscale')
 
 
 class Cell:
@@ -517,6 +566,7 @@ class RPSPygame:
         self.running = False
         self.fps = 15
         self.mode = "random"
+        self.view_mode = "normal"
         self.copy_board = False
         self.is_drawing = False
         self.fullscreen = False
@@ -527,7 +577,15 @@ class RPSPygame:
         self.next_frame_time = None
         self.cell_positions = []
 
-        self.colors = {cell_type: hex_to_rgb(color) for cell_type, color in Cell.colors.items()}
+        self.default_colors = {cell_type: hex_to_rgb(color) for cell_type, color in Cell.colors.items()}
+        self.color_modes = {
+            'normal': self.default_colors,
+            'water': {cell_type: hex_to_rgb(color) for cell_type, color in WATER_COLORS.items()},
+            'clouds': {cell_type: hex_to_rgb(color) for cell_type, color in CLOUD_COLORS.items()},
+            'sand': {cell_type: hex_to_rgb(color) for cell_type, color in SAND_COLORS.items()},
+            'grayscale': {cell_type: hex_to_rgb(color) for cell_type, color in GRAYSCALE_COLORS.items()},
+        }
+        self.colors = self.color_modes[self.view_mode]
         self.palette = {
             'background': (235, 238, 240),
             'panel': (246, 247, 248),
@@ -613,6 +671,7 @@ class RPSPygame:
         add_button("Full", 56, self.toggle_fullscreen)
         self.hd_button = add_button("HD: off", 68, self.toggle_hd_mode)
         self.mode_button = add_button("Mode: random", 110, self.toggle_mode)
+        self.view_button = add_button("View: normal", 126, self.toggle_view_mode)
 
         self.loopback_toggle = Toggle(
             (x, y1, 104, 28),
@@ -724,6 +783,14 @@ class RPSPygame:
 
     def toggle_mode(self):
         self.mode = "fixed" if self.mode == "random" else "random"
+
+    def toggle_view_mode(self):
+        current_index = VIEW_MODES.index(self.view_mode)
+        self.view_mode = VIEW_MODES[(current_index + 1) % len(VIEW_MODES)]
+        self.colors = self.color_modes[self.view_mode]
+        view_name = self.view_mode
+        self.draw_board()
+        self.set_status(f"View mode: {view_name}.", seconds=2.0)
 
     def toggle_fullscreen(self):
         self.fullscreen = not self.fullscreen
@@ -1033,6 +1100,8 @@ class RPSPygame:
             self.load_map_from_box()
         elif event.key == pygame.K_m:
             self.toggle_mode()
+        elif event.key == pygame.K_v:
+            self.toggle_view_mode()
         elif event.key == pygame.K_w:
             self.set_loopback(not self.board.canvas_loopback)
         elif event.key == pygame.K_c:
@@ -1099,6 +1168,8 @@ class RPSPygame:
         self.start_button.text = "Pause" if self.running else "Start"
         self.hd_button.text = "HD: on" if self.resolution_scale == HD_RESOLUTION_SCALE else "HD: off"
         self.mode_button.text = f"Mode: {self.mode}"
+        self.view_button.text = f"View: {self.view_mode}"
+        self.view_button.selected = self.view_mode != "normal"
         for button, cell_type in self.brush_buttons:
             button.selected = cell_type == self.current_type
 
@@ -1114,7 +1185,7 @@ class RPSPygame:
         stats = self.small_font.render(stats_text, True, self.palette['muted'])
         self.screen.blit(stats, (10, self.screen.get_height() - 22))
 
-        hint = "Space start/pause | . step | F fullscreen | H HD | 1-9 brushes | +/- pen | L load"
+        hint = "Space start/pause | . step | F fullscreen | H HD | V view | 1-9 brushes | +/- pen | L load"
         hint_surf = self.small_font.render(hint, True, self.palette['muted'])
         self.screen.blit(hint_surf, (self.screen.get_width() - hint_surf.get_width() - 10, self.screen.get_height() - 42))
 
